@@ -335,6 +335,8 @@ const state = {
   key: "", tab: "pool", snapshot: null, requests: [], streaming: false,
   stopStream: null, timer: null, ticker: null, onboardStep: 0,
   usage: null, window: "24h", groupBy: "account", oauthConfig: null,
+  //: offline = the gateway is not answering at all, as opposed to refusing us.
+  offline: false, pollDelay: 5000, streamDelay: 2500, streamTimer: null, open: false,
   //: name -> categorical slot, assigned once and never reassigned, so a range
   //: change that reorders the groups cannot repaint them.
   slots: {},
@@ -441,10 +443,66 @@ function banner(message, kind) {
     ? `<div class="note ${kind || "err"}">${esc(message)}</div>` : "";
 }
 
+function bannerHTML(html, kind) {
+  el("banner").innerHTML = `<div class="note ${kind || "err"}">${html}</div>`;
+}
+
+/**
+ * The gateway stopped answering.
+ *
+ * Three things have to happen, and only the first used to. Say so, in terms of the
+ * address that is not answering. Stop presenting numbers that are now history as
+ * though they were live. And back off — polling four endpoints every five seconds
+ * forever fills the browser console with hundreds of failures and finds nothing out
+ * that the first one did not.
+ */
+function goOffline() {
+  if (!state.offline) {
+    state.offline = true;
+    setLive(false);
+    document.querySelector(".main").classList.add("stale");
+  }
+  state.pollDelay = Math.min(30000, Math.round((state.pollDelay || 5000) * 1.8));
+  bannerHTML(
+    `<span>Cannot reach the gateway at <b class="mono">${esc(location.host)}</b>.
+     It may have stopped, or be restarting. Retrying every
+     ${Math.round(state.pollDelay / 1000)}s.
+     <button class="btn sm" id="retry-now" style="margin-left:10px">Retry now</button></span>`,
+    "err");
+  const retry = el("retry-now");
+  if (retry) retry.addEventListener("click", () => { state.pollDelay = 5000; pollNow(); });
+}
+
+function goOnline() {
+  if (state.offline) {
+    state.offline = false;
+    document.querySelector(".main").classList.remove("stale");
+    banner("");
+    // The stream is on its own backoff, which may be half a minute out. Cancel it
+    // and reconnect now, or the chip reads "offline" for another 30s against a
+    // gateway that is plainly answering.
+    if (state.streamTimer) { clearTimeout(state.streamTimer); state.streamTimer = null; }
+    state.streamDelay = 2500;
+    if (!state.streaming) connectStream();
+    setLive(state.streaming);
+  }
+  state.pollDelay = 5000;
+}
+
 async function api(path, options) {
-  const response = await fetch(path, Object.assign({
-    headers: { "x-api-key": state.key, "content-type": "application/json" }
-  }, options || {}));
+  let response;
+  try {
+    response = await fetch(path, Object.assign({
+      headers: { "x-api-key": state.key, "content-type": "application/json" }
+    }, options || {}));
+  } catch (networkError) {
+    // fetch only rejects below HTTP: the gateway is not answering at all. That is
+    // a different situation from a request it refused, and saying "Failed to
+    // fetch" — which is all the browser gives us — helps nobody.
+    const offline = new Error("offline");
+    offline.offline = true;
+    throw offline;
+  }
   if (response.status === 401 || response.status === 403) {
     signOut(response.status === 403
       ? "That key is not an admin key." : "That key was rejected.");
@@ -1694,6 +1752,7 @@ async function refresh() {
     const [snapshot, horizon, recent] = await Promise.all([
       api("/admin/status"), api("/admin/horizon"), api("/admin/requests?limit=100"),
     ]);
+    goOnline();
     state.snapshot = snapshot;
     // Always seed from history. The live feed only carries *new* events, so a
     // console that relied on it alone showed an empty list until traffic arrived.
@@ -1716,6 +1775,7 @@ async function refresh() {
     paintRequests();
     tick();
   } catch (error) {
+    if (error.offline) { goOffline(); return; }
     if (error.message !== "unauthorized") banner(error.message);
   }
 }
@@ -1737,6 +1797,7 @@ async function connectStream() {
       headers: { "x-api-key": state.key }, signal: controller.signal
     });
     if (!response.ok || !response.body) throw new Error("no stream");
+    state.streamDelay = 2500;
     setLive(true);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -1763,13 +1824,22 @@ async function connectStream() {
     if (controller.signal.aborted) return;
   }
   setLive(false);
-  setTimeout(() => { if (state.key) connectStream(); }, 5000);
+  // Same backoff as the poll: a gateway that is down stays down for a while, and
+  // reconnecting every five seconds only fills the console.
+  state.streamDelay = Math.min(30000, Math.round((state.streamDelay || 2500) * 2));
+  if (state.streamTimer) clearTimeout(state.streamTimer);
+  state.streamTimer = setTimeout(() => {
+    state.streamTimer = null;
+    if (state.key || state.open) connectStream();
+  }, state.streamDelay);
 }
 
 function setLive(on) {
   state.streaming = on;
   el("live").className = "status " + (on ? "on" : "off");
-  el("live-text").textContent = on ? "live" : "polling";
+  // "polling" used to cover both a missing stream and a missing gateway, which
+  // read as healthy while nothing at all was getting through.
+  el("live-text").textContent = on ? "live" : (state.offline ? "offline" : "polling");
 }
 
 // ---- shell -------------------------------------------------------------------
@@ -1803,23 +1873,37 @@ function show(name) {
 
 function signIn(key) {
   state.key = key;
+  state.open = true;
   try { localStorage.setItem(KEY_STORE, key); } catch (e) { /* private mode */ }
   el("gate").classList.add("hidden");
   el("app").classList.remove("hidden");
   el("addr").textContent = location.host;
-  refresh();
   connectStream();
-  if (state.timer) clearInterval(state.timer);
+  if (state.timer) clearTimeout(state.timer);
   if (state.ticker) clearInterval(state.ticker);
-  state.timer = setInterval(refresh, 5000);
+  state.pollDelay = 5000;
+  pollNow();
   state.ticker = setInterval(tick, 1000);   // the page's only moving part
+}
+
+/** Poll on a self-scheduling timer rather than a fixed interval, so a gateway that
+ *  has gone away is retried more slowly instead of hammered forever. */
+async function pollNow() {
+  if (state.timer) clearTimeout(state.timer);
+  if (!state.key && !state.open) return;
+  await refresh();
+  if (state.key || state.open) {
+    state.timer = setTimeout(pollNow, state.pollDelay || 5000);
+  }
 }
 
 function signOut(message) {
   state.key = "";
+  state.open = false;
   try { localStorage.removeItem(KEY_STORE); } catch (e) { /* ignore */ }
   if (state.stopStream) state.stopStream();
-  if (state.timer) clearInterval(state.timer);
+  if (state.streamTimer) { clearTimeout(state.streamTimer); state.streamTimer = null; }
+  if (state.timer) clearTimeout(state.timer);
   if (state.ticker) clearInterval(state.ticker);
   closeModal();
   el("app").classList.add("hidden");

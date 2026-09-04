@@ -103,6 +103,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docker/tokenbiryani.yaml` is in the repository. An unanchored `tokenbiryani.yaml`
   ignore rule matched it at every depth, so the file `docker compose up` mounts was
   never committed and a fresh clone could not start the stack.
+- The console now says when the gateway has stopped answering, instead of polling it
+  forever while the live chip read "polling" and pre-outage numbers sat there looking
+  current. It names the address, dims the stale panel, backs off to a 30s cap, offers
+  a Retry, and reconnects the event stream as soon as the gateway is back.
 - The console page and stylesheet are re-read when they change on disk. They were
   cached for the life of the process, so editing the console under `serve --reload`
   or with the source bind-mounted showed the old page until something restarted it.
