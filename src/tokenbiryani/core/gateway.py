@@ -20,7 +20,7 @@ from typing import Any, AsyncIterator, Dict, List, Mapping, Optional, Tuple
 
 import httpx
 
-from ..config import Config, ConfigError, KeyConfig
+from ..config import AccountConfig, Config, ConfigError, KeyConfig
 from ..observability.events import Attempt, EventLog, RequestEvent
 from ..observability.metrics import Metrics
 from ..providers.anthropic_api import build_upstream
@@ -32,7 +32,7 @@ from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
 from .keys import KeyRegistry, generate_key, record_from_config
-from .limits import TokenEstimate, estimate_request
+from .limits import LimitMirror, TokenEstimate, estimate_request
 from .queue import (
     MAX_WAIT_HEADER,
     PRIORITY_BATCH,
@@ -119,6 +119,7 @@ class Gateway:
         for account_config in config.accounts:
             self.accounts[account_config.id] = AccountRuntime(
                 config=account_config,
+                mirror=_mirror_for(account_config),
                 breaker=CircuitBreaker(
                     failure_threshold=config.breaker.failure_threshold,
                     cooldown_seconds=config.breaker.cooldown_seconds,
@@ -233,6 +234,7 @@ class Gateway:
             if existing is None:
                 self.accounts[account_config.id] = AccountRuntime(
                     config=account_config,
+                    mirror=_mirror_for(account_config),
                     breaker=CircuitBreaker(
                         failure_threshold=config.breaker.failure_threshold,
                         cooldown_seconds=config.breaker.cooldown_seconds,
@@ -246,6 +248,8 @@ class Gateway:
                 or existing.config.type != account_config.type
             )
             existing.config = account_config
+            existing.mirror.observable = account_config.observable_limits
+            existing.mirror.assumed_headroom = account_config.assumed_headroom
             existing.breaker.failure_threshold = config.breaker.failure_threshold
             existing.breaker.cooldown_seconds = config.breaker.cooldown_seconds
             if credentials_changed:
@@ -1058,6 +1062,11 @@ class Gateway:
             for account in self.accounts.values():
                 if account.state(now) is AccountState.DISABLED:
                     continue
+                if not account.mirror.observable:
+                    # Nothing is known about this account's future capacity, and a
+                    # horizon that quietly includes a guess is worse than one that
+                    # leaves it out.
+                    continue
                 window = account.mirror.input_tokens
                 if window.limit is None:
                     continue
@@ -1130,6 +1139,12 @@ class _Plan:
     def __post_init__(self) -> None:
         if self.excluded is None:
             self.excluded = []
+
+
+def _mirror_for(config: AccountConfig) -> LimitMirror:
+    return LimitMirror(
+        observable=config.observable_limits, assumed_headroom=config.assumed_headroom
+    )
 
 
 def _positive_float(raw: Optional[str], fallback: float) -> float:

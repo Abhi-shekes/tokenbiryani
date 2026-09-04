@@ -57,6 +57,13 @@ class AccountConfig:
     #: Provider-specific settings — region, project, model_map, and so on. Kept
     #: untyped so a new adapter needs no change to the config schema.
     options: Dict[str, Any] = field(default_factory=dict)
+    #: False when this upstream reports no anthropic-ratelimit-* headers. An
+    #: unobservable account must not read as "full", or it wins every comparison
+    #: against accounts that honestly report a partly-used budget.
+    observable_limits: bool = True
+    #: Headroom to assume for an unobservable account. Deliberately middling: it
+    #: should neither dominate a healthy pool nor be starved by it.
+    assumed_headroom: float = 0.5
 
     def supports_model(self, model: str) -> bool:
         for pattern in self.models:

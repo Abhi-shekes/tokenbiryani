@@ -33,6 +33,18 @@ must not stop the gateway starting. `tokenbiryani strategies` lists what loaded.
 
 ## A provider adapter
 
+Ship it under the `tokenbiryani.providers` entry point, and the account `type` becomes
+available without touching core:
+
+```toml
+[project.entry-points."tokenbiryani.providers"]
+my_platform = "my_package:MyUpstream"
+```
+
+The value is anything callable with an `AccountConfig` that returns an `Upstream`.
+Built-in type names cannot be shadowed, and a plugin that fails to import is logged
+and skipped.
+
 Implement `providers.base.Upstream`: `url`, `auth_headers`, and optionally override
 `send` / `open_stream`. If the platform does not stream SSE natively, override
 `iter_sse` and translate there, so the rest of the gateway keeps reading ordinary
@@ -40,6 +52,13 @@ streaming.
 
 `providers/bedrock.py` is the awkward case worth reading: SigV4 per request, and a
 binary event-stream decoded back to SSE.
+
+If your platform reports no `anthropic-ratelimit-*` headers, set
+`observable_limits: false` on those accounts. Otherwise their windows never populate,
+an unknown window reads as full, and the account beats every account that honestly
+reports a partly-used budget — permanently. Unobservable accounts are scored at
+`assumed_headroom` and excluded from the capacity horizon, which would otherwise be
+promising capacity nobody can see.
 
 ## A state store
 

@@ -148,11 +148,21 @@ class Lease:
 
 @dataclass
 class LimitMirror:
-    """Per-account mirror of the upstream's advertised budget, plus outstanding leases."""
+    """Per-account mirror of the upstream's advertised budget, plus outstanding leases.
+
+    ``observable`` is False for upstreams that report no rate-limit headers. Their
+    windows never populate, and an unknown window otherwise reads as full — which
+    would make such an account beat every account that honestly reports a partly-used
+    budget. Instead they score at ``assumed_headroom`` and are left out of anything
+    that claims to know future capacity.
+    """
 
     requests: LimitWindow = field(default_factory=LimitWindow)
     input_tokens: LimitWindow = field(default_factory=LimitWindow)
     output_tokens: LimitWindow = field(default_factory=LimitWindow)
+
+    observable: bool = True
+    assumed_headroom: float = 0.5
 
     reserved_requests: int = 0
     reserved_input: int = 0
@@ -243,6 +253,8 @@ class LimitMirror:
 
     def headroom(self, now: float) -> float:
         """The binding constraint across all three dimensions."""
+        if not self.observable and not self.input_tokens.known:
+            return self.assumed_headroom
         return min(
             self.requests.fraction(self.reserved_requests, now),
             self.input_tokens.fraction(self.reserved_input, now),
@@ -270,6 +282,7 @@ class LimitMirror:
             }
 
         return {
+            "observable": self.observable,
             "requests": window(self.requests, self.reserved_requests),
             "input_tokens": window(self.input_tokens, self.reserved_input),
             "output_tokens": window(self.output_tokens, self.reserved_output),
