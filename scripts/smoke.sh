@@ -12,7 +12,16 @@ KEY="bir_smoketest_key_0123456789"
 PIDS=()
 
 cleanup() {
-  for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+  for pid in "${PIDS[@]:-}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  # Insist, then reap. A survivor would answer the next run's checks and quietly
+  # test the wrong build.
+  sleep 0.5
+  for pid in "${PIDS[@]:-}"; do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -73,7 +82,8 @@ YAML
 
 wait_for "http://127.0.0.1:$UPSTREAM_PORT/v1/models" "mock upstream"
 
-(cd "$WORK" && python3 -m tokenbiryani.cli serve --log-level warning >"$WORK/gateway.log" 2>&1) &
+(cd "$WORK" && exec python3 -m tokenbiryani.cli serve --log-level warning \
+  >"$WORK/gateway.log" 2>&1) &
 PIDS+=($!)
 wait_for "http://127.0.0.1:$GATEWAY_PORT/healthz" "gateway"
 
