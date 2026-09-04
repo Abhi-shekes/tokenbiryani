@@ -43,8 +43,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - CLI: `init`, `serve`, `status`, `strategies`, `keygen`.
 
 **Testing**
-- Scriptable mock Anthropic upstream, usable in-process or as a real server.
-- 189 tests and an end-to-end smoke test over real sockets.
+- Scriptable mock Anthropic upstream, usable in-process or as a real server, which
+  models the per-credential prompt cache and can add latency to force real overlap.
+- 203 tests, including a lease-concurrency suite, at 85% coverage.
+- `benchmarks/cache_affinity.py`, with a regression test that fails if sticky routing
+  ever stops beating cache-blind routing.
+- End-to-end smoke test over real sockets.
+
+**Project**
+- Container image (non-root, healthchecked) and `docker compose up`.
+- CI: ruff, mypy, coverage-gated tests on 3.8/3.10/3.12, a real-Redis job, an image
+  boot check, a strict docs build, and release-on-tag to PyPI and GHCR.
+- Documentation site, code of conduct, issue and PR templates.
 
 ### Security
 - `/admin/*` requires an admin key. Previously any valid key could read the pool's
