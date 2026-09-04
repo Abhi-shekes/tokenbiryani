@@ -376,3 +376,49 @@ def test_a_rejected_key_returns_you_to_the_landing_page_with_a_reason(page):
     page.wait_for_selector("#app:not(.hidden)", timeout=15000)
     page.click(".nav button[data-tab='pool']")
     page.wait_for_selector("#stream [data-request]", timeout=15000)
+
+
+def test_a_gateway_that_stops_answering_is_said_so_not_hidden(page, live):
+    """The console used to keep polling a dead gateway forever, four endpoints every
+    five seconds, while the live chip read "polling" and stale numbers sat there
+    looking current. The browser console filled with hundreds of failures and the
+    screen said nothing useful.
+    """
+    context = page.context.browser.new_context(viewport={"width": 1280, "height": 900})
+    visitor = context.new_page()
+    errors = []
+    visitor.on("pageerror", lambda exc: errors.append(str(exc)))
+    try:
+        visitor.goto(live + "/console", wait_until="networkidle")
+        visitor.fill("#gate-key", "bir_test")
+        visitor.click("#gate-go")
+        visitor.wait_for_selector("#accounts-wrap tr[data-account]", timeout=15000)
+
+        context.set_offline(True)
+        visitor.wait_for_selector("#banner .note.err", timeout=20000)
+
+        text = visitor.inner_text("#banner")
+        assert "Cannot reach the gateway" in text
+        assert live.split("//")[1] in text, "it names the address that is not answering"
+        assert "offline" == visitor.inner_text("#live-text"), "not 'polling'"
+        assert "stale" in visitor.get_attribute(".main", "class"), \
+            "numbers from before the outage must not read as current"
+
+        # And it backs off rather than hammering.
+        visitor.wait_for_function(
+            "state.pollDelay > 5000", timeout=20000)
+        assert visitor.evaluate("state.pollDelay") <= 30000, "the backoff is capped"
+
+        context.set_offline(False)
+        visitor.click("#retry-now")
+        visitor.wait_for_function(
+            "!document.querySelector('#banner .note.err')", timeout=20000)
+        assert visitor.evaluate("state.pollDelay") == 5000, "backoff resets on recovery"
+        assert "stale" not in (visitor.get_attribute(".main", "class") or "")
+        # The stream is reconnected rather than left on its own long backoff.
+        visitor.wait_for_function(
+            "document.getElementById('live-text').textContent === 'live'", timeout=20000)
+        assert errors == [], errors
+    finally:
+        context.set_offline(False)
+        context.close()
