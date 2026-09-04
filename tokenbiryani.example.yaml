@@ -55,6 +55,20 @@ batch:
   # Applied to computed cost for spilled work. Operator-supplied, like `pricing`.
   cost_multiplier: 0.5
 
+store:
+  # memory  — in-process, loses affinity and spend on restart
+  # sqlite  — one file; what makes a spend cap mean anything after a restart
+  # redis   — shared between instances
+  backend: memory
+  path: tokenbiryani.db
+  url: redis://127.0.0.1:6379/0
+  namespace: tokenbiryani
+
+spend:
+  # Caps are windowed, not lifetime. A lifetime cap on a persistent store would
+  # eventually wedge the gateway shut and stay that way.
+  window_hours: 24
+
 observability:
   # Prompts are sensitive. Turning this on logs request bodies.
   log_bodies: false

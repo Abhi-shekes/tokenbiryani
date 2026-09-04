@@ -171,6 +171,36 @@ class ModelPrice:
 
 
 @dataclass
+class StoreConfig:
+    """Where shared state lives: affinity, spend, per-key request counts.
+
+    `memory` keeps everything in-process and loses it on restart. `sqlite` persists
+    to one file, which is what makes a spend cap mean anything across a restart.
+    `redis` shares state between instances.
+    """
+
+    backend: str = "memory"
+    path: str = "tokenbiryani.db"
+    url: str = "redis://127.0.0.1:6379/0"
+    namespace: str = "tokenbiryani"
+
+
+@dataclass
+class SpendConfig:
+    """Spend caps are windowed, not lifetime.
+
+    A lifetime cap on a persistent store would eventually wedge the gateway shut and
+    stay that way; a rolling window is what an operator actually means by "cap".
+    """
+
+    window_hours: float = 24.0
+
+    @property
+    def window_seconds(self) -> float:
+        return self.window_hours * 3600.0
+
+
+@dataclass
 class ObservabilityConfig:
     #: prompts are sensitive; never log bodies unless the operator opts in
     log_bodies: bool = False
@@ -185,6 +215,8 @@ class Config:
     breaker: BreakerConfig = field(default_factory=BreakerConfig)
     queue: QueueConfig = field(default_factory=QueueConfig)
     batch: BatchConfig = field(default_factory=BatchConfig)
+    store: StoreConfig = field(default_factory=StoreConfig)
+    spend: SpendConfig = field(default_factory=SpendConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     accounts: List[AccountConfig] = field(default_factory=list)
     keys: List[KeyConfig] = field(default_factory=list)
@@ -247,6 +279,8 @@ class Config:
             breaker=build(BreakerConfig, raw.get("breaker")),
             queue=build(QueueConfig, raw.get("queue")),
             batch=build(BatchConfig, raw.get("batch")),
+            store=build(StoreConfig, raw.get("store")),
+            spend=build(SpendConfig, raw.get("spend")),
             observability=build(ObservabilityConfig, raw.get("observability")),
             accounts=accounts,
             keys=keys,

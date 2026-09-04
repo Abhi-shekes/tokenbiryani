@@ -148,6 +148,11 @@ routing:
   # Alternatives: headroom, cost_tiered, priority, least_loaded, round_robin
   strategy: sticky_headroom
 
+store:
+  # Persist affinity and the spend ledger so they survive a restart.
+  backend: sqlite
+  path: tokenbiryani.db
+
 accounts:
   - id: acct-01
     type: anthropic_api

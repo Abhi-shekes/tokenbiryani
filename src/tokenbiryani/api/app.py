@@ -43,12 +43,14 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
     async def _startup() -> None:
         await app.state.gateway.startup()
         app.state.watcher = asyncio.ensure_future(app.state.gateway.watch_config())
+        app.state.resync = asyncio.ensure_future(app.state.gateway.resync_spend())
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
-        watcher = getattr(app.state, "watcher", None)
-        if watcher is not None:
-            watcher.cancel()
+        for name in ("watcher", "resync"):
+            task = getattr(app.state, name, None)
+            if task is not None:
+                task.cancel()
         await app.state.gateway.aclose()
 
     def authenticate(request: Request) -> KeyConfig:

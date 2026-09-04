@@ -27,8 +27,7 @@ from ..providers.anthropic_api import build_upstream
 from ..providers.base import BLOCKED_RESPONSE_HEADERS, Upstream
 from ..proxy import sse
 from ..proxy.errors import Classification, RequestAction, classify, classify_exception
-from ..store.base import StateStore
-from ..store.memory import MemoryStateStore
+from ..store.base import SCOPE_ACCOUNT, SCOPE_KEY, StateStore, build_store
 from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
@@ -108,7 +107,7 @@ class Gateway:
         client: Optional[httpx.AsyncClient] = None,
     ) -> None:
         self.config = config
-        self.store = store or MemoryStateStore()
+        self.store = store or build_store(config)
         self.keys = KeyRegistry(config.keys)
         self.events = EventLog(config.observability.event_buffer)
         self.metrics = Metrics()
@@ -138,6 +137,30 @@ class Gateway:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.config.server.request_timeout_seconds, connect=10.0)
             )
+        await self.store.startup()
+        await self.hydrate_spend()
+
+    async def hydrate_spend(self) -> None:
+        """Load each account's windowed spend from the store.
+
+        Account caps are checked on the synchronous routing path, so the figure is
+        cached in memory. Without this, a restart would hand every capped account a
+        clean slate — which is the whole reason the ledger is persistent.
+        """
+        totals = await self.store.spend_by_scope(SCOPE_ACCOUNT, self.config.spend.window_seconds)
+        for account_id, total in totals.items():
+            account = self.accounts.get(account_id)
+            if account is not None:
+                account.spend_usd = total
+
+    async def resync_spend(self, interval: float = 60.0) -> None:
+        """Re-read spend periodically so the cached figure cannot drift past the window."""
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.hydrate_spend()
+            except Exception as exc:  # noqa: BLE001 - a store blip must not kill routing
+                logger.warning("spend resync failed: %s", exc)
 
     def reload(self, config: Config) -> Dict[str, Any]:
         """Swap in a new config without dropping in-flight state.
@@ -239,6 +262,7 @@ class Gateway:
         if self._client is not None and self._owns_client:
             await self._client.aclose()
             self._client = None
+        await self.store.close()
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -367,11 +391,15 @@ class Gateway:
                     retry_after=60.0,
                 )
         if key.spend_cap_usd is not None:
-            spent = await self.store.get_spend(key.name)
+            spent = await self.store.get_spend(
+                SCOPE_KEY, key.name, self.config.spend.window_seconds
+            )
             if spent >= key.spend_cap_usd:
                 raise GatewayError(
                     429,
-                    f"key {key.name!r} has reached its ${key.spend_cap_usd:.2f} spend cap",
+                    f"key {key.name!r} has spent ${spent:.2f} of its "
+                    f"${key.spend_cap_usd:.2f} cap in the last "
+                    f"{self.config.spend.window_hours:.0f}h",
                     kind="rate_limit_error",
                 )
 
@@ -826,7 +854,8 @@ class Gateway:
         )
 
         if cost is not None:
-            await self.store.add_spend(plan.key.name, cost)
+            await self.store.add_spend(SCOPE_KEY, plan.key.name, cost)
+            await self.store.add_spend(SCOPE_ACCOUNT, account.id, cost)
 
         saved = None
         if price is not None and usage.cache_read_tokens:
