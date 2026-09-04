@@ -56,6 +56,21 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: bash scripts/smoke.sh
 
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: python -m playwright install --with-deps chromium
+      # Drives the real console in a real browser. The static assertions in
+      # tests/test_console.py cannot catch a panel that renders empty.
+      - run: pytest -q tests/test_console_ui.py
+        env:
+          TOKENBIRYANI_UI_BROWSER: chromium
+
   contrib:
     runs-on: ubuntu-latest
     steps:

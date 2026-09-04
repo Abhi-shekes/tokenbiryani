@@ -70,3 +70,33 @@ async def test_console_calls_are_authenticated(mock):
     async with client_for(mock) as client:
         for path in ("/admin/status", "/admin/horizon", "/admin/requests", "/admin/keys"):
             assert (await client.get(path)).status_code == 401
+
+
+async def test_the_mock_window_rolls_so_countdowns_mean_something(mock):
+    """A frozen reset timestamp makes every countdown in the console read 'now'."""
+    import time
+
+    from tokenbiryani.testing.mock_upstream import MockAccount
+
+    account = MockAccount(api_key="k", window_seconds=60.0)
+    account.input_remaining = 5
+    past = time.time() - 1
+    account.reset_at = past
+
+    account.roll_window()
+
+    assert account.reset_at > time.time(), "the window must move into the future"
+    assert account.input_remaining == account.input_limit, "and refill on the way"
+
+
+async def test_a_rolled_window_shows_a_real_countdown(gateway_factory, mock, key):
+    import time
+
+    from conftest import body
+
+    gateway = gateway_factory(["a"])
+    mock.accounts["a"].reset_at = time.time() - 1     # already expired
+    await gateway.complete(body(), {}, key)
+
+    reset_in = gateway.accounts["a"].mirror.input_tokens.seconds_to_reset(time.time())
+    assert reset_in is not None and reset_in > 0, "the console would show 'now' forever"

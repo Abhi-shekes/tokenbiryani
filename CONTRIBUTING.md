@@ -35,6 +35,16 @@ python -m tokenbiryani.testing.server --port 9911 --accounts key-a,key-b
 routing. A change to the router that improves throughput while quietly costing cache
 hits is a regression here, which is the point.
 
+## The console
+
+`tests/test_console.py` asserts on the served HTML; `tests/test_console_ui.py` drives
+it in a real browser and is the only thing that can catch a panel that renders empty.
+It skips itself when no Chrome or Chromium is installed, so it will pass silently on a
+machine that cannot run it — check CI.
+
+Screenshot-worthy states to keep working: no accounts (onboarding), one account (the
+table degrades to a card), the whole pool cooling, and a disabled credential.
+
 ## Concurrency
 
 `tests/test_concurrency.py` is the only place overlapping requests are exercised, and

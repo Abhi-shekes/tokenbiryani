@@ -138,9 +138,26 @@ class MockAccount:
         if self.reset_at is None:
             self.reset_at = time.time() + self.window_seconds
 
+    def roll_window(self, now: Optional[float] = None) -> None:
+        """Refill once the window has passed, the way a real limit window does.
+
+        Without this the reset timestamp is frozen at construction, every countdown
+        reads "now" forever, and the capacity horizon can never show a step.
+        """
+        now = time.time() if now is None else now
+        if self.reset_at is None or now < self.reset_at:
+            return
+        elapsed = now - self.reset_at
+        periods = int(elapsed // self.window_seconds) + 1
+        self.reset_at += periods * self.window_seconds
+        self.requests_remaining = self.requests_limit
+        self.input_remaining = self.input_limit
+        self.output_remaining = self.output_limit
+
     def headers(self) -> Dict[str, str]:
         if not self.emit_limit_headers:
             return {}
+        self.roll_window()
         reset = _rfc3339(self.reset_at or time.time())
         return {
             "anthropic-ratelimit-requests-limit": str(self.requests_limit),

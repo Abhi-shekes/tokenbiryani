@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-density="comfortable">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,6 +18,7 @@
   --crit:#DA6355;  --crit-t:#F08878;  --crit-w:#2A1614;
   --cache:#9068DE; --cache-t:#B18CF0; --cache-w:#1D1630;
   --brand:#E9A94A;
+  --row:9px; --gap:16px;
 }
 :root[data-theme="light"]{
   --bg:#F4F6F9; --panel:#FFFFFF; --panel2:#EBEEF3;
@@ -29,6 +30,8 @@
   --cache:#7A4FD0; --cache-t:#5F3BA6; --cache-w:#EFE9FB;
   --brand:#A6620F;
 }
+:root[data-density="compact"]{ --row:4px; --gap:10px; }
+
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font-family:Archivo,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -62,24 +65,31 @@ main{padding:16px 18px 48px;max-width:1400px;margin:0 auto}
 .hidden{display:none!important}
 
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;
-  background:var(--rule);border:1px solid var(--rule);border-radius:7px;overflow:hidden;margin-bottom:16px}
+  background:var(--rule);border:1px solid var(--rule);border-radius:7px;overflow:hidden;
+  margin-bottom:var(--gap)}
 .stat{background:var(--panel);padding:11px 13px;display:flex;flex-direction:column;gap:3px}
 .stat .lb{font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
 .stat .vl{font-size:19px;font-weight:500;letter-spacing:-.02em;line-height:1.15}
 .stat .vl small{font-size:11px;color:var(--dim);font-weight:400}
 .stat .sub{font-size:10px;color:var(--dim)}
 .stat.cache .vl{color:var(--cache-t)}
+.stat.warn .vl{color:var(--crit-t)}
 
-.card{background:var(--panel);border:1px solid var(--rule);border-radius:7px;margin-bottom:16px;overflow:hidden}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:7px;
+  margin-bottom:var(--gap);overflow:hidden}
 .card>h2{margin:0;padding:11px 15px;border-bottom:1px solid var(--rule);font-size:11.5px;
   font-weight:600;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
 .card>h2 .note{font-size:10px;color:var(--dim);font-weight:400}
 .card .body{padding:13px 15px}
+h3{font-size:11px;margin:18px 0 6px;color:var(--ink)}
 
 /* capacity horizon */
-.hz{display:flex;align-items:flex-end;gap:2px;height:78px}
-.hz div{flex:1;background:var(--ready);border-radius:4px 4px 0 0;min-width:5px;min-height:2px}
-.hz div:hover{background:var(--ready-t)}
+.hz{display:flex;align-items:flex-end;gap:2px;height:78px;position:relative;
+  background:linear-gradient(to top,var(--rule) 1px,transparent 1px) 0 100%/100% 25% repeat-y}
+.hz div{flex:1;background:var(--ready);border-radius:4px 4px 0 0;min-width:5px;min-height:2px;
+  opacity:.85}
+.hz div:hover{opacity:1;background:var(--ready-t)}
+.hz div.step{box-shadow:inset 0 2px 0 var(--ready-t)}
 .hzx{display:flex;gap:2px;margin-top:6px;border-top:1px solid var(--rule);padding-top:5px}
 .hzx span{flex:1;text-align:center;font-size:8.5px;color:var(--dim)}
 .hznote{margin-top:9px;font-size:10px;color:var(--dim);display:flex;gap:16px;flex-wrap:wrap}
@@ -89,10 +99,11 @@ table{width:100%;border-collapse:collapse}
 th{text-align:left;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
   font-weight:600;padding:0 10px 8px;white-space:nowrap}
 th.r{text-align:right}
-td{border-top:1px solid var(--rule);padding:9px 10px;color:var(--mid);vertical-align:middle}
+td{border-top:1px solid var(--rule);padding:var(--row) 10px;color:var(--mid);vertical-align:middle}
 td.r{text-align:right;white-space:nowrap;color:var(--ink)}
 tbody tr:hover td{background:var(--panel2)}
 tr.click{cursor:pointer}
+tr.click:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .scroll{overflow-x:auto}
 .aid{color:var(--ink);font-weight:500;display:flex;align-items:center;gap:6px}
 .ameta{font-size:10px;color:var(--dim)}
@@ -105,20 +116,25 @@ tr.click{cursor:pointer}
 .pill.disabled{background:var(--crit-w);color:var(--crit-t)} .pill.disabled i{background:var(--crit)}
 .tag{font-size:8.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
   color:var(--cache-t);background:var(--cache-w);padding:2px 5px;border-radius:3px}
+.tag.blind{color:var(--dim);background:var(--panel2)}
 
-.meters{display:flex;flex-direction:column;gap:3px;min-width:140px}
+.meters{display:flex;flex-direction:column;gap:3px;min-width:150px}
 .mtr{display:flex;align-items:center;gap:7px}
 .mtr .k{font-size:8.5px;color:var(--dim);width:16px}
 .mtr .tr{flex:1;height:4px;background:var(--rule);border-radius:2px;overflow:hidden}
 .mtr .tr i{display:block;height:100%;border-radius:2px}
-.mtr .v{font-size:9.5px;color:var(--mid);width:52px;text-align:right}
+.mtr .v{font-size:9.5px;color:var(--mid);width:64px;text-align:right}
+.spark{display:block}
 
-.stream .row{display:grid;grid-template-columns:64px 92px minmax(0,1fr) 64px 58px 52px;
-  gap:10px;padding:7px 15px;border-top:1px solid var(--rule);font-size:10.5px;color:var(--mid);
-  align-items:center;cursor:pointer}
+.stream .row{display:grid;grid-template-columns:64px 92px minmax(0,1fr) 64px 58px 56px;
+  gap:10px;padding:var(--row) 15px;border-top:1px solid var(--rule);font-size:10.5px;
+  color:var(--mid);align-items:center;cursor:pointer}
 .stream .row:hover{background:var(--panel2)}
+.stream .row:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .stream .row .m{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stream .row.brk{background:var(--cache-w)}
+.stream .head{cursor:default;color:var(--dim);font-size:9.5px;letter-spacing:.09em;
+  text-transform:uppercase;font-weight:600;font-family:Archivo,sans-serif}
 .ok{color:var(--ready-t)} .er{color:var(--crit-t)} .ca{color:var(--cache-t)} .dm{color:var(--dim)}
 @media(max-width:720px){.stream .row{grid-template-columns:1fr 1fr;gap:3px 10px}}
 
@@ -144,26 +160,48 @@ tr.won td:first-child{color:var(--ready-t)}
 input,select{background:var(--panel2);border:1px solid var(--rule2);border-radius:5px;
   padding:7px 9px;color:var(--ink);font-family:inherit;font-size:12px;min-width:0}
 .primary{background:var(--brand);color:#1A1204;border:0;border-radius:5px;padding:8px 14px;font-weight:600}
+.primary:disabled{opacity:.5;cursor:default}
 .danger{background:transparent;border:1px solid var(--crit);color:var(--crit-t);border-radius:5px;padding:4px 9px}
 .notice{padding:10px 13px;border-radius:6px;font-size:11.5px;margin-bottom:12px;border:1px solid}
 .notice.err{background:var(--crit-w);border-color:var(--crit);color:var(--crit-t)}
 .notice.ok{background:var(--ready-w);border-color:var(--ready);color:var(--ready-t)}
-.empty{padding:26px 15px;text-align:center;color:var(--dim);font-size:12px}
+.notice.warn{background:var(--cool-w);border-color:var(--cool);color:var(--cool-t)}
+.empty{padding:26px 15px;text-align:center;color:var(--dim);font-size:12px;line-height:1.7}
+.empty b{color:var(--mid);font-weight:500}
 
-/* first run */
-.gate{max-width:420px;margin:64px auto;display:flex;flex-direction:column;gap:14px;text-align:center}
+/* single-account pool degrades to a card rather than a one-row table */
+.solo{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;
+  background:var(--rule)}
+.solo>div{background:var(--panel);padding:11px 13px;display:flex;flex-direction:column;gap:3px}
+.solo .lb{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+.solo .vl{font-size:15px;color:var(--ink)}
+
+/* gate + first run */
+.gate{max-width:460px;margin:64px auto;display:flex;flex-direction:column;gap:14px;text-align:center}
 .gate h1{font-size:19px;margin:0;letter-spacing:-.015em}
 .gate p{margin:0;color:var(--dim);font-size:12px;line-height:1.55}
 .gate .row{display:flex;gap:8px}
 .gate input{flex:1}
 pre{background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:11px 13px;
-  font-size:10.5px;color:var(--mid);text-align:left;overflow-x:auto;margin:0;line-height:1.8}
+  font-size:10.5px;color:var(--mid);text-align:left;overflow-x:auto;margin:0;line-height:1.8;
+  white-space:pre-wrap;word-break:break-all}
 pre b{color:var(--ready-t);font-weight:400}
-@media (prefers-reduced-motion:no-preference){.hz div{transition:height .3s ease}}
+.steps{display:flex;gap:5px;width:100%}
+.steps i{flex:1;height:2px;border-radius:1px;background:var(--rule2);display:block}
+.steps i.on{background:var(--brand)}
+.copy{background:transparent;border:1px solid var(--rule2);color:var(--mid);border-radius:5px;
+  padding:3px 8px;font-size:10.5px}
+
+@media (prefers-reduced-motion:no-preference){
+  .hz div{transition:height .3s ease}
+  .stream .row{transition:background .12s ease}
+}
 </style>
 </head>
 <body>
 
+<!-- Sign-in: the shell has no data, so this is the only thing an unauthenticated
+     visitor can see. -->
 <div id="gate" class="gate hidden">
   <h1>tokenbiryani console</h1>
   <p>Paste an admin key. It is kept in this browser only and sent as <code>x-api-key</code>.</p>
@@ -185,6 +223,7 @@ keys:
   <span class="addr mono" id="addr"></span>
   <span class="spacer"></span>
   <span class="live" id="live"><i></i><span id="live-text">connecting</span></span>
+  <button class="iconbtn" id="density" title="Row density">density</button>
   <button class="iconbtn" id="theme">theme</button>
   <button class="iconbtn" id="signout">sign out</button>
 </header>
@@ -201,22 +240,25 @@ keys:
   <div id="banner"></div>
 
   <section data-panel="pool">
-    <div class="stats" id="stats"></div>
-    <div class="card">
-      <h2>Capacity horizon <span class="note">projected input tokens available · next 60 min</span></h2>
-      <div class="body">
-        <div class="hz" id="hz"></div>
-        <div class="hzx" id="hzx"></div>
-        <div class="hznote" id="hznote"></div>
+    <div id="onboarding"></div>
+    <div id="pool-body">
+      <div class="stats" id="stats"></div>
+      <div class="card">
+        <h2>Capacity horizon <span class="note">projected input tokens available · next 60 min</span></h2>
+        <div class="body">
+          <div class="hz" id="hz"></div>
+          <div class="hzx" id="hzx"></div>
+          <div class="hznote" id="hznote"></div>
+        </div>
       </div>
-    </div>
-    <div class="card">
-      <h2>Accounts <span class="note" id="pool-note"></span></h2>
-      <div class="scroll"><table id="accounts"></table></div>
-    </div>
-    <div class="card stream">
-      <h2>Live requests <span class="note">newest first</span></h2>
-      <div id="stream"></div>
+      <div class="card">
+        <h2>Accounts <span class="note" id="pool-note"></span></h2>
+        <div id="accounts-wrap" class="scroll"></div>
+      </div>
+      <div class="card stream">
+        <h2>Live requests <span class="note">newest first · click one to inspect</span></h2>
+        <div id="stream"></div>
+      </div>
     </div>
   </section>
 
@@ -271,12 +313,16 @@ keys:
 
 <script>
 "use strict";
-const KEY_STORE = "tokenbiryani.key", THEME_STORE = "tokenbiryani.theme";
-const $ = (s) => document.querySelector(s);
+const KEY_STORE = "tokenbiryani.key", THEME_STORE = "tokenbiryani.theme",
+      DENSITY_STORE = "tokenbiryani.density";
 const el = (id) => document.getElementById(id);
-let apiKey = "", tab = "pool", latest = null, streaming = false, stopStream = null;
 
-// ---- small helpers -----------------------------------------------------------
+const state = {
+  key: "", tab: "pool", snapshot: null, requests: [], streaming: false,
+  stopStream: null, timer: null, ticker: null,
+};
+
+// ---- helpers -----------------------------------------------------------------
 const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g,
   (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pct = (f) => f == null ? "—" : Math.round(f * 100) + "%";
@@ -293,6 +339,21 @@ const tokens = (n) => {
 };
 const usd = (n) => n == null ? "—" : "$" + Number(n).toFixed(n < 1 ? 4 : 2);
 const hhmmss = (epoch) => new Date(epoch * 1000).toTimeString().slice(0, 8);
+const now = () => Date.now() / 1000;
+
+/** A countdown renders once and then ticks itself, so the page has one moving part. */
+function countdown(seconds) {
+  if (seconds == null) return '<span class="mono dm">—</span>';
+  return `<span class="mono cd" data-until="${(now() + seconds).toFixed(1)}">${clock(seconds)}</span>`;
+}
+
+function tick() {
+  document.querySelectorAll(".cd").forEach((node) => {
+    const remaining = parseFloat(node.dataset.until) - now();
+    node.textContent = remaining <= 0 ? "now" : clock(remaining);
+    node.classList.toggle("dm", remaining <= 0);
+  });
+}
 
 function banner(message, kind) {
   el("banner").innerHTML = message
@@ -301,7 +362,7 @@ function banner(message, kind) {
 
 async function api(path, options) {
   const response = await fetch(path, Object.assign({
-    headers: { "x-api-key": apiKey, "content-type": "application/json" }
+    headers: { "x-api-key": state.key, "content-type": "application/json" }
   }, options || {}));
   if (response.status === 401 || response.status === 403) {
     signOut(response.status === 403
@@ -309,114 +370,214 @@ async function api(path, options) {
     throw new Error("unauthorized");
   }
   if (!response.ok) {
-    let detail = response.status + "";
+    let detail = String(response.status);
     try { detail = (await response.json()).error.message; } catch (e) { /* keep status */ }
     throw new Error(detail);
   }
   return response.status === 204 ? null : response.json();
 }
 
-// ---- rendering ---------------------------------------------------------------
+// ---- pool --------------------------------------------------------------------
 function renderStats(snapshot) {
   const pool = snapshot.pool, stats = snapshot.stats;
+  const cooling = pool.cooling, disabled = pool.disabled;
   el("stats").innerHTML = [
     ["Ready now", tokens(pool.ready_input_tokens) + "<small> tok</small>",
-      pool.ready + " of " + pool.total + " accounts", ""],
-    ["Next reset", clock(pool.next_reset_seconds), "earliest window", ""],
-    ["Queue", String(snapshot.queue.depth), "max " + snapshot.queue.max_size, ""],
+      `${pool.ready} of ${pool.total} accounts`, ""],
+    ["Next reset", countdown(pool.next_reset_seconds), "earliest window", ""],
+    ["Queue", String(snapshot.queue.depth), "max " + snapshot.queue.max_size,
+      snapshot.queue.depth > 0 ? "warn" : ""],
     ["Cache hit", pct(stats.cache_hit_rate), stats.cache_breaks + " breaks / 1h", "cache"],
     ["Spend 1h", usd(stats.spend_usd), stats.requests + " requests", ""],
-    ["Failovers", String(stats.failovers), stats.errors + " errors / 1h", ""]
+    ["Failovers", String(stats.failovers), stats.errors + " errors / 1h",
+      stats.errors > 0 ? "warn" : ""],
   ].map(([label, value, sub, cls]) =>
     `<div class="stat ${cls}"><span class="lb">${label}</span>
      <span class="vl mono">${value}</span><span class="sub">${esc(sub)}</span></div>`).join("");
+
   el("pool-note").textContent =
-    snapshot.pool.total + " in pool · strategy " + snapshot.strategy;
+    `${pool.total} in pool · strategy ${snapshot.strategy}` +
+    (cooling ? ` · ${cooling} cooling` : "") + (disabled ? ` · ${disabled} disabled` : "");
+
+  // The console's worst moment must still be useful.
+  if (pool.ready === 0 && pool.total > 0) {
+    banner(
+      disabled === pool.total
+        ? "Every account is disabled. This does not self-heal — check credentials."
+        : "The whole pool is cooling. Capacity returns at the countdown above; queued requests will be served then.",
+      disabled === pool.total ? "err" : "warn");
+  } else if (disabled > 0) {
+    banner(`${disabled} account(s) disabled — usually a rotated key. See Accounts.`, "err");
+  } else {
+    banner("");
+  }
 }
 
 function meter(label, window) {
-  const kind = window.fraction > 0.25 ? "ready" : window.fraction > 0.05 ? "cool" : "crit";
-  const width = Math.max(2, Math.round((window.fraction || 0) * 100));
+  const fraction = window.fraction == null ? 0 : window.fraction;
+  const kind = fraction > 0.25 ? "ready" : fraction > 0.05 ? "cool" : "crit";
+  const width = Math.max(2, Math.round(fraction * 100));
+  // Always show the percentage: it is the one figure comparable across accounts,
+  // whether or not the upstream told us an absolute budget.
+  const absolute = window.available == null ? "" : " " + tokens(window.available);
   return `<span class="mtr"><span class="k mono">${label}</span>
     <span class="tr"><i style="width:${width}%;background:var(--${kind})"></i></span>
-    <span class="v mono">${window.available == null ? pct(window.fraction) : tokens(window.available)}</span></span>`;
+    <span class="v mono">${pct(window.fraction)}${absolute}</span></span>`;
+}
+
+/** Latency sparkline built from request history — no extra endpoint needed. */
+function sparkline(accountId) {
+  const points = state.requests
+    .filter((r) => r.account_id === accountId && r.latency)
+    .slice(0, 14).reverse().map((r) => r.latency);
+  if (points.length < 2) return '<span class="dm mono" style="font-size:10px">—</span>';
+  const high = Math.max(...points), low = Math.min(...points);
+  const span = (high - low) || 1;
+  const step = 50 / (points.length - 1);
+  const coords = points.map((v, i) =>
+    `${(i * step).toFixed(1)},${(16 - ((v - low) / span) * 13).toFixed(1)}`);
+  const [lastX, lastY] = coords[coords.length - 1].split(",");
+  return `<svg class="spark" width="52" height="18" viewBox="0 0 52 18" fill="none"
+      role="img" aria-label="latency trend, ${points.length} requests, latest ${points[points.length-1].toFixed(2)}s">
+    <polyline points="${coords.join(" ")}" stroke="var(--ready)" stroke-width="2"
+      fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="var(--ready-t)"/></svg>`;
+}
+
+function accountRow(account) {
+  const limits = account.limits;
+  const cooling = account.state === "cooling" && account.cooling_for != null
+    ? " " + clock(account.cooling_for) : "";
+  const blind = limits.observable === false
+    ? ' <span class="tag blind" title="this upstream reports no rate-limit headers">no limits</span>' : "";
+  return `<tr class="click" tabindex="0" data-account="${esc(account.id)}"
+      aria-label="account ${esc(account.id)}, ${esc(account.state)}">
+    <td><span class="aid mono">${esc(account.id)}${blind}</span><span class="ameta">${esc(account.type)}</span></td>
+    <td><span class="pill ${esc(account.state)}"><i></i>${esc(account.state)}${cooling}</span></td>
+    <td><span class="meters">${meter("req", limits.requests)}${meter("in", limits.input_tokens)}${meter("out", limits.output_tokens)}</span></td>
+    <td class="r">${countdown(limits.input_tokens.reset_in)}</td>
+    <td class="r mono">${account.inflight}</td>
+    <td class="r mono">${account.p95_latency == null ? "—" : account.p95_latency.toFixed(2) + "s"}</td>
+    <td class="r">${sparkline(account.id)}</td>
+    <td class="r mono ca">${pct(account.cache_hit_rate)}</td>
+    <td class="r mono">${usd(account.spend_usd)}</td></tr>`;
 }
 
 function renderAccounts(snapshot) {
-  const rows = snapshot.accounts.map((a) => {
-    const limits = a.limits;
-    const cooling = a.state === "cooling" && a.cooling_for != null
-      ? " " + clock(a.cooling_for) : "";
-    return `<tr class="click" data-account="${esc(a.id)}">
-      <td><span class="aid mono">${esc(a.id)}</span><span class="ameta">${esc(a.type)}</span></td>
-      <td><span class="pill ${esc(a.state)}"><i></i>${esc(a.state)}${cooling}</span></td>
-      <td><span class="meters">${meter("req", limits.requests)}${meter("in", limits.input_tokens)}${meter("out", limits.output_tokens)}</span></td>
-      <td class="r mono">${clock(limits.input_tokens.reset_in)}</td>
-      <td class="r mono">${a.inflight}</td>
-      <td class="r mono">${a.p95_latency == null ? "—" : a.p95_latency.toFixed(2) + "s"}</td>
-      <td class="r mono ca">${pct(a.cache_hit_rate)}</td>
-      <td class="r mono">${usd(a.spend_usd)}</td></tr>`;
-  }).join("");
-  el("accounts").innerHTML = `<thead><tr><th>Account</th><th>State</th><th>Headroom</th>
+  const wrap = el("accounts-wrap");
+  const accounts = snapshot.accounts;
+
+  if (accounts.length === 1) {
+    // One account is a common way to start; a one-row table looks broken.
+    const a = accounts[0], l = a.limits;
+    wrap.innerHTML = `<div class="solo">
+      <div><span class="lb">Account</span><span class="vl mono">${esc(a.id)}</span></div>
+      <div><span class="lb">State</span><span class="vl"><span class="pill ${esc(a.state)}"><i></i>${esc(a.state)}</span></span></div>
+      <div><span class="lb">Requests</span><span class="vl mono">${pct(l.requests.fraction)}</span></div>
+      <div><span class="lb">Input</span><span class="vl mono">${pct(l.input_tokens.fraction)}</span></div>
+      <div><span class="lb">Output</span><span class="vl mono">${pct(l.output_tokens.fraction)}</span></div>
+      <div><span class="lb">Reset</span><span class="vl">${countdown(l.input_tokens.reset_in)}</span></div>
+      <div><span class="lb">Cache</span><span class="vl mono ca">${pct(a.cache_hit_rate)}</span></div>
+      <div><span class="lb">Spend</span><span class="vl mono">${usd(a.spend_usd)}</span></div>
+    </div>`;
+    wrap.querySelectorAll(".solo").forEach((node) => {
+      node.style.cursor = "pointer";
+      node.addEventListener("click", () => openAccount(accounts[0].id));
+    });
+    return;
+  }
+
+  wrap.innerHTML = `<table><thead><tr><th>Account</th><th>State</th><th>Headroom</th>
     <th class="r">Reset</th><th class="r">Inflight</th><th class="r">p95</th>
-    <th class="r">Cache</th><th class="r">Spend</th></tr></thead><tbody>${rows}</tbody>`;
-  el("accounts").querySelectorAll("tr[data-account]").forEach((row) =>
-    row.addEventListener("click", () => openAccount(row.dataset.account)));
+    <th class="r">Trend</th><th class="r">Cache</th><th class="r">Spend</th></tr></thead>
+    <tbody>${accounts.map(accountRow).join("")}</tbody></table>`;
+  activate(wrap.querySelectorAll("tr[data-account]"), (node) => openAccount(node.dataset.account));
 }
 
 function renderHorizon(horizon) {
   const series = horizon.series || [];
-  const peak = Math.max(1, ...series.map((p) => p.input_tokens));
-  el("hz").innerHTML = series.map((p) =>
-    `<div style="height:${Math.max(2, (p.input_tokens / peak) * 100)}%"
-      title="+${Math.round(p.offset_seconds / 60)} min — ${tokens(p.input_tokens)} tokens"></div>`).join("");
-  el("hzx").innerHTML = series.map((p, i) =>
-    `<span class="mono">${i === 0 ? "now" : "+" + Math.round(p.offset_seconds / 60)}</span>`).join("");
-  const now = series.length ? series[0].input_tokens : 0;
-  const end = series.length ? series[series.length - 1].input_tokens : 0;
+  if (!series.length || series.every((p) => !p.input_tokens)) {
+    el("hz").innerHTML = "";
+    el("hzx").innerHTML = "";
+    el("hznote").innerHTML =
+      "<span>No account reports a budget the gateway can project. " +
+      "The horizon needs <b>anthropic-ratelimit-*</b> headers.</span>";
+    return;
+  }
+  // Scale to a little above the peak: a plot filled edge to edge reads as "maxed
+  // out" when what it actually shows is "steady".
+  const ceiling = Math.max(...series.map((p) => p.input_tokens)) * 1.25;
+  el("hz").innerHTML = series.map((point, index) => {
+    const grew = index > 0 && point.input_tokens > series[index - 1].input_tokens;
+    const height = Math.max(4, (point.input_tokens / ceiling) * 100);
+    return `<div class="${grew ? "step" : ""}" style="height:${height}%"
+      title="+${Math.round(point.offset_seconds / 60)} min — ${tokens(point.input_tokens)} tokens${grew ? " (a window resets)" : ""}"></div>`;
+  }).join("");
+  el("hzx").innerHTML = series.map((point, index) =>
+    `<span class="mono">${index === 0 ? "now" : "+" + Math.round(point.offset_seconds / 60)}</span>`).join("");
+  const start = series[0].input_tokens, end = series[series.length - 1].input_tokens;
   el("hznote").innerHTML =
-    `<span><b class="mono">${tokens(now)}</b> now</span>
+    `<span><b class="mono">${tokens(start)}</b> now</span>
      <span><b class="mono">${tokens(end)}</b> in ${horizon.minutes} min</span>` +
-    (end > now ? `<span>capacity returns as windows reset</span>` : "");
+    (end > start
+      ? `<span>capacity returns as windows reset</span>`
+      : `<span>flat — nothing resets in this window</span>`);
 }
 
-function requestRow(r) {
-  const status = r.status == null ? "—" : r.status;
-  const cls = r.error ? "er" : r.affinity_broken ? "ca" : "ok";
-  const label = r.affinity_broken ? "break" : status;
-  return `<div class="row mono ${r.affinity_broken ? "brk" : ""}" data-request="${esc(r.request_id)}">
-    <span>${hhmmss(r.started_at)}</span>
-    <span>${esc(r.account_id || "—")}</span>
-    <span class="m">${esc(r.model)}${r.via === "batch" ? " · batch" : ""}</span>
-    <span>${tokens(r.input_tokens + r.cache_read_tokens)}</span>
-    <span>${r.latency ? r.latency.toFixed(2) + "s" : "—"}</span>
+// ---- requests ----------------------------------------------------------------
+function requestRow(request) {
+  const status = request.status == null ? "—" : request.status;
+  const cls = request.error ? "er" : request.affinity_broken ? "ca" : "ok";
+  const label = request.affinity_broken ? "break" : status;
+  const via = request.via === "batch" ? " · batch" : "";
+  return `<div class="row mono ${request.affinity_broken ? "brk" : ""}" tabindex="0"
+      data-request="${esc(request.request_id)}" aria-label="request at ${hhmmss(request.started_at)}">
+    <span>${hhmmss(request.started_at)}</span>
+    <span>${esc(request.account_id || "—")}</span>
+    <span class="m">${esc(request.model)}${via}</span>
+    <span>${tokens(request.input_tokens + request.cache_read_tokens)}</span>
+    <span>${request.latency ? request.latency.toFixed(2) + "s" : "—"}</span>
     <span class="${cls}">${esc(label)}</span></div>`;
 }
 
+const STREAM_HEAD = `<div class="row head">
+  <span>Time</span><span>Account</span><span>Model</span><span>Tokens</span>
+  <span>Latency</span><span>Status</span></div>`;
+
 function renderRequests(target, list) {
   const node = el(target);
-  if (!list.length) { node.innerHTML = `<div class="empty">No requests yet.</div>`; return; }
-  node.innerHTML =
-    `<div class="row" style="color:var(--dim);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:600;cursor:default">
-      <span>Time</span><span>Account</span><span>Model</span><span>Tokens</span><span>Latency</span><span>Status</span></div>` +
-    list.map(requestRow).join("");
-  node.querySelectorAll("[data-request]").forEach((row) =>
-    row.addEventListener("click", () => openRequest(row.dataset.request)));
+  if (!node) return;
+  if (!list.length) {
+    node.innerHTML = `<div class="empty">No requests yet.<br>
+      <b>Send one</b> and it appears here within a second.</div>`;
+    return;
+  }
+  node.innerHTML = STREAM_HEAD + list.map(requestRow).join("");
+  activate(node.querySelectorAll("[data-request]"), (n) => openRequest(n.dataset.request));
 }
 
-function renderInspector(r) {
-  const chain = r.attempts.map((a, i) => {
-    const won = a.kind === "ok" || a.kind === "batch";
-    return (i ? `<span class="arrow mono">── retry ──▶</span>` : "") +
-      `<span class="node ${won ? "win" : "fail"}"><span class="n mono">${esc(a.account_id)}</span>
-       <span class="s mono">${esc(a.status == null ? a.kind : a.status + " " + a.kind)} · ${a.latency.toFixed(3)}s</span></span>`;
-  }).join("");
+function paintRequests() {
+  renderRequests("stream", state.requests.slice(0, 25));
+  renderRequests("requests", state.requests);
+}
 
-  const decision = r.decision;
-  let table = `<div class="empty">No routing decision recorded for this request.</div>`;
+function renderInspector(request) {
+  const chain = request.attempts.map((attempt, index) => {
+    const won = attempt.kind === "ok" || attempt.kind === "batch";
+    const detail = attempt.status == null
+      ? attempt.kind : `${attempt.status} ${attempt.kind}`;
+    return (index ? `<span class="arrow mono">── retry ──▶</span>` : "") +
+      `<span class="node ${won ? "win" : "fail"}"><span class="n mono">${esc(attempt.account_id)}</span>
+       <span class="s mono">${esc(detail)} · ${attempt.latency.toFixed(3)}s</span></span>`;
+  }).join("") || '<span class="dm">No attempt was made.</span>';
+
+  const decision = request.decision;
+  let table = `<div class="empty">No routing decision was recorded — the request failed
+    before a candidate was chosen.</div>`;
   if (decision && decision.candidates && decision.candidates.length) {
-    const names = Array.from(new Set(decision.candidates.flatMap(
-      (c) => Object.keys(c.terms || {}))));
+    const names = [];
+    decision.candidates.forEach((c) => Object.keys(c.terms || {}).forEach(
+      (n) => names.includes(n) || names.push(n)));
     table = `<div class="scroll"><table><thead><tr><th>Candidate</th>` +
       names.map((n) => `<th class="r">${esc(n)}</th>`).join("") +
       `<th class="r">Score</th><th>Verdict</th></tr></thead><tbody>` +
@@ -428,25 +589,28 @@ function renderInspector(r) {
   }
 
   el("inspector").innerHTML = `<div class="card">
-    <h2><span class="mono">${esc(r.request_id)}</span>
-      <span class="note">${esc(r.model)} · ${esc(r.priority)}${r.via === "batch" ? " · via batch" : ""} · ${r.attempts.length} attempt(s)</span></h2>
+    <h2><span class="mono">${esc(request.request_id)}</span>
+      <span class="note">${esc(request.model)} · ${esc(request.priority)}${request.via === "batch" ? " · via batch" : ""} · ${request.attempts.length} attempt(s)</span></h2>
     <div class="body">
       <div class="chain">${chain}</div>
-      ${r.queued_for ? `<p style="color:var(--dim);font-size:10.5px;margin:8px 0 0">queued ${r.queued_for.toFixed(2)}s waiting for capacity</p>` : ""}
-      <h3 style="font-size:11px;margin:18px 0 6px;color:var(--ink)">Routing decision${decision ? " · strategy " + esc(decision.strategy) : ""}</h3>
+      ${request.queued_for ? `<p style="color:var(--dim);font-size:10.5px;margin:8px 0 0">queued ${request.queued_for.toFixed(2)}s waiting for capacity</p>` : ""}
+      ${request.affinity_broken ? `<div class="notice warn" style="margin-top:10px">Affinity broke: this
+        conversation moved off the account holding its prompt cache, so its prefix was billed fresh.</div>` : ""}
+      <h3>Routing decision${decision ? " · strategy " + esc(decision.strategy) : ""}</h3>
       ${table}
       <div class="kv">
-        <div><span class="lb">Input</span><span class="vl mono">${r.input_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Cache read</span><span class="vl mono ca">${r.cache_read_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Cache write</span><span class="vl mono">${r.cache_creation_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Output</span><span class="vl mono">${r.output_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Cost</span><span class="vl mono">${usd(r.cost_usd)}</span></div>
-        <div><span class="lb">Saved by cache</span><span class="vl mono ca">${usd(r.saved_usd)}</span></div>
+        <div><span class="lb">Input</span><span class="vl mono">${request.input_tokens.toLocaleString()}</span></div>
+        <div><span class="lb">Cache read</span><span class="vl mono ca">${request.cache_read_tokens.toLocaleString()}</span></div>
+        <div><span class="lb">Cache write</span><span class="vl mono">${request.cache_creation_tokens.toLocaleString()}</span></div>
+        <div><span class="lb">Output</span><span class="vl mono">${request.output_tokens.toLocaleString()}</span></div>
+        <div><span class="lb">Cost</span><span class="vl mono">${usd(request.cost_usd)}</span></div>
+        <div><span class="lb">Saved by cache</span><span class="vl mono ca">${usd(request.saved_usd)}</span></div>
       </div>
     </div></div>`;
   el("inspector").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+// ---- other panels ------------------------------------------------------------
 function renderKeys(keys) {
   el("keys").innerHTML = `<thead><tr><th>Name</th><th>Key</th><th>Source</th><th>Models</th>
     <th>Pool</th><th class="r">RPM</th><th class="r">Cap</th><th>Admin</th><th></th></tr></thead><tbody>` +
@@ -477,58 +641,99 @@ function renderSettings(snapshot) {
     `<div><span class="lb">${label}</span><span class="vl mono">${esc(value)}</span></div>`).join("");
 }
 
+/** No accounts at all: the activation funnel, not an empty table. */
+function renderOnboarding(snapshot) {
+  const empty = snapshot.pool.total === 0;
+  el("pool-body").classList.toggle("hidden", empty);
+  if (!empty) { el("onboarding").innerHTML = ""; return; }
+  const origin = location.origin;
+  el("onboarding").innerHTML = `<div class="card"><div class="body">
+    <div class="gate" style="margin:18px auto 8px">
+      <span class="steps"><i class="on"></i><i></i><i></i></span>
+      <h1>Add your first credential</h1>
+      <p>The gateway has no accounts, so it has nothing to route to. Accounts live in
+      the config file — it is re-read automatically, so there is no restart.</p>
+      <pre>accounts:
+  - id: acct-01
+    type: anthropic_api
+    api_key: <b>\${ANTHROPIC_API_KEY}</b></pre>
+      <p>Then point your tools at the pool:</p>
+      <pre id="onboard-exports">export ANTHROPIC_BASE_URL=<b>${esc(origin)}</b>
+export ANTHROPIC_AUTH_TOKEN=<b>your key</b>
+claude</pre>
+      <div class="row" style="justify-content:center">
+        <button class="copy" id="onboard-copy">Copy the export lines</button>
+        <button class="primary" id="onboard-recheck">Check again</button>
+      </div>
+      <div id="onboard-msg"></div>
+    </div></div></div>`;
+  el("onboard-recheck").addEventListener("click", refresh);
+  el("onboard-copy").addEventListener("click", async () => {
+    const text = `export ANTHROPIC_BASE_URL=${origin}\nexport ANTHROPIC_AUTH_TOKEN=your key\nclaude`;
+    try {
+      await navigator.clipboard.writeText(text);
+      el("onboard-msg").innerHTML = '<div class="notice ok">Copied.</div>';
+    } catch (e) {
+      el("onboard-msg").innerHTML = '<div class="notice warn">Copy failed — select the text above.</div>';
+    }
+  });
+}
+
 // ---- data --------------------------------------------------------------------
 async function refresh() {
   try {
-    const [snapshot, horizon] = await Promise.all([
-      api("/admin/status"), api("/admin/horizon")
+    const [snapshot, horizon, recent] = await Promise.all([
+      api("/admin/status"), api("/admin/horizon"), api("/admin/requests?limit=100"),
     ]);
-    latest = snapshot;
-    banner("");
-    renderStats(snapshot); renderAccounts(snapshot); renderHorizon(horizon);
+    state.snapshot = snapshot;
+    // Always seed from history. The live feed only carries *new* events, so a
+    // console that relied on it alone showed an empty list until traffic arrived.
+    state.requests = recent.requests;
+    renderOnboarding(snapshot);
+    renderStats(snapshot);
+    renderAccounts(snapshot);
+    renderHorizon(horizon);
     renderSettings(snapshot);
-    if (!streaming) {
-      const recent = await api("/admin/requests?limit=25");
-      renderRequests("stream", recent.requests);
-      renderRequests("requests", recent.requests);
-    }
+    paintRequests();
+    tick();
   } catch (error) {
     if (error.message !== "unauthorized") banner(error.message);
   }
 }
 
 async function openRequest(id) {
+  show("requests");
   try { renderInspector(await api("/admin/requests/" + encodeURIComponent(id))); }
   catch (error) { banner(error.message); }
-  show("requests");
 }
 
 async function openAccount(id) {
+  show("accounts");
   try {
-    const a = await api("/admin/accounts/" + encodeURIComponent(id));
-    const kinds = Object.entries(a.error_kinds || {});
+    const account = await api("/admin/accounts/" + encodeURIComponent(id));
+    const kinds = Object.entries(account.error_kinds || {});
     el("account-detail").innerHTML = `<div class="card">
-      <h2><span class="mono">${esc(a.id)}</span>
-        <span class="note">${esc(a.type)} · cost tier ${a.cost_tier} · priority ${a.priority}</span></h2>
+      <h2><span class="mono">${esc(account.id)}</span>
+        <span class="note">${esc(account.type)} · cost tier ${account.cost_tier} · priority ${account.priority}</span></h2>
       <div class="body">
+        ${account.disabled_reason ? `<div class="notice err">Disabled: ${esc(account.disabled_reason)}.
+          This does not self-heal — fix the credential and reload the config.</div>` : ""}
         <div class="kv">
-          <div><span class="lb">State</span><span class="vl"><span class="pill ${esc(a.state)}"><i></i>${esc(a.state)}</span></span></div>
-          <div><span class="lb">Requests</span><span class="vl mono">${a.requests_total}</span></div>
-          <div><span class="lb">Failures</span><span class="vl mono">${a.failures_total}</span></div>
-          <div><span class="lb">p95</span><span class="vl mono">${a.p95_latency == null ? "—" : a.p95_latency.toFixed(2) + "s"}</span></div>
-          <div><span class="lb">Cache hit</span><span class="vl mono ca">${pct(a.cache_hit_rate)}</span></div>
-          <div><span class="lb">Spend</span><span class="vl mono">${usd(a.spend_usd)}</span></div>
-          <div><span class="lb">Input tok</span><span class="vl mono">${tokens(a.tokens.input)}</span></div>
-          <div><span class="lb">Output tok</span><span class="vl mono">${tokens(a.tokens.output)}</span></div>
+          <div><span class="lb">State</span><span class="vl"><span class="pill ${esc(account.state)}"><i></i>${esc(account.state)}</span></span></div>
+          <div><span class="lb">Requests</span><span class="vl mono">${account.requests_total}</span></div>
+          <div><span class="lb">Failures</span><span class="vl mono">${account.failures_total}</span></div>
+          <div><span class="lb">p95</span><span class="vl mono">${account.p95_latency == null ? "—" : account.p95_latency.toFixed(2) + "s"}</span></div>
+          <div><span class="lb">Cache hit</span><span class="vl mono ca">${pct(account.cache_hit_rate)}</span></div>
+          <div><span class="lb">Spend</span><span class="vl mono">${usd(account.spend_usd)}</span></div>
+          <div><span class="lb">Input tok</span><span class="vl mono">${tokens(account.tokens.input)}</span></div>
+          <div><span class="lb">Output tok</span><span class="vl mono">${tokens(account.tokens.output)}</span></div>
         </div>
-        ${kinds.length ? `<h3 style="font-size:11px;margin:18px 0 6px">Errors by class</h3>
-          <div class="kv">${kinds.map(([k, v]) =>
-            `<div><span class="lb">${esc(k)}</span><span class="vl mono">${v}</span></div>`).join("")}</div>` : ""}
+        ${kinds.length ? `<h3>Errors by class</h3><div class="kv">${kinds.map(([k, v]) =>
+          `<div><span class="lb">${esc(k)}</span><span class="vl mono">${v}</span></div>`).join("")}</div>` : ""}
       </div></div>
       <div class="card stream"><h2>Recent requests <span class="note">including attempts it failed</span></h2>
         <div id="account-requests"></div></div>`;
-    renderRequests("account-requests", a.recent_requests || []);
-    show("accounts");
+    renderRequests("account-requests", account.recent_requests || []);
   } catch (error) { banner(error.message); }
 }
 
@@ -538,6 +743,7 @@ async function loadKeys() {
 }
 
 async function createKey() {
+  const button = el("k-create");
   const pool = el("k-pool").value.split(",").map((s) => s.trim()).filter(Boolean);
   const payload = {
     name: el("k-name").value.trim(),
@@ -547,14 +753,17 @@ async function createKey() {
     priority: el("k-pri").value,
     admin: el("k-admin").value === "true"
   };
+  button.disabled = true;
   try {
     const created = await api("/admin/keys", { method: "POST", body: JSON.stringify(payload) });
-    el("k-result").innerHTML = `<div class="notice ok">Copy this now — it is not stored
+    el("k-result").innerHTML = `<div class="notice ok">Copy this now — it is stored hashed
       and cannot be shown again.<br><code>${esc(created.key)}</code></div>`;
-    el("k-name").value = ""; el("k-pool").value = ""; el("k-rpm").value = ""; el("k-cap").value = "";
+    ["k-name", "k-pool", "k-rpm", "k-cap"].forEach((id) => { el(id).value = ""; });
     loadKeys();
   } catch (error) {
     el("k-result").innerHTML = `<div class="notice err">${esc(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -581,11 +790,10 @@ async function reloadConfig() {
 // SSE stream is read through fetch instead.
 async function connectStream() {
   const controller = new AbortController();
-  stopStream = () => controller.abort();
-  const seen = [];
+  state.stopStream = () => controller.abort();
   try {
     const response = await fetch("/admin/events", {
-      headers: { "x-api-key": apiKey }, signal: controller.signal
+      headers: { "x-api-key": state.key }, signal: controller.signal
     });
     if (!response.ok || !response.body) throw new Error("no stream");
     setLive(true);
@@ -598,34 +806,47 @@ async function connectStream() {
       buffer += decoder.decode(value, { stream: true });
       const frames = buffer.split("\n\n");
       buffer = frames.pop();
+      let changed = false;
       for (const frame of frames) {
         const line = frame.split("\n").find((l) => l.startsWith("data:"));
         if (!line) continue;
         try {
-          seen.unshift(JSON.parse(line.slice(5).trim()));
-          if (seen.length > 25) seen.pop();
-          renderRequests("stream", seen);
-          renderRequests("requests", seen);
+          state.requests.unshift(JSON.parse(line.slice(5).trim()));
+          if (state.requests.length > 200) state.requests.pop();
+          changed = true;
         } catch (e) { /* a malformed frame must not kill the feed */ }
       }
+      if (changed) paintRequests();
     }
   } catch (error) {
     if (controller.signal.aborted) return;
   }
   setLive(false);
-  // Fall back to polling rather than going dark.
-  setTimeout(() => { if (apiKey) connectStream(); }, 5000);
+  setTimeout(() => { if (state.key) connectStream(); }, 5000);
 }
 
 function setLive(on) {
-  streaming = on;
+  state.streaming = on;
   el("live").className = "live " + (on ? "on" : "off");
   el("live-text").textContent = on ? "live" : "polling";
 }
 
 // ---- shell -------------------------------------------------------------------
+/** Click plus Enter/Space, so the whole console is reachable from the keyboard. */
+function activate(nodes, handler) {
+  nodes.forEach((node) => {
+    node.addEventListener("click", () => handler(node));
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        handler(node);
+      }
+    });
+  });
+}
+
 function show(name) {
-  tab = name;
+  state.tab = name;
   document.querySelectorAll("nav button").forEach((b) =>
     b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("[data-panel]").forEach((p) =>
@@ -634,28 +855,33 @@ function show(name) {
 }
 
 function signIn(key) {
-  apiKey = key;
+  state.key = key;
   try { localStorage.setItem(KEY_STORE, key); } catch (e) { /* private mode */ }
   el("gate").classList.add("hidden");
   el("app").classList.remove("hidden");
   el("addr").textContent = location.host;
   refresh();
   connectStream();
-  setInterval(refresh, 5000);
+  if (state.timer) clearInterval(state.timer);
+  if (state.ticker) clearInterval(state.ticker);
+  state.timer = setInterval(refresh, 5000);
+  state.ticker = setInterval(tick, 1000);   // the page's only moving part
 }
 
 function signOut(message) {
-  apiKey = "";
+  state.key = "";
   try { localStorage.removeItem(KEY_STORE); } catch (e) { /* ignore */ }
-  if (stopStream) stopStream();
+  if (state.stopStream) state.stopStream();
+  if (state.timer) clearInterval(state.timer);
+  if (state.ticker) clearInterval(state.ticker);
   el("app").classList.add("hidden");
   el("gate").classList.remove("hidden");
   el("gate-msg").innerHTML = message ? `<div class="notice err">${esc(message)}</div>` : "";
 }
 
-function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  try { localStorage.setItem(THEME_STORE, theme); } catch (e) { /* ignore */ }
+function setAttr(name, store, value) {
+  document.documentElement.setAttribute(name, value);
+  try { localStorage.setItem(store, value); } catch (e) { /* ignore */ }
 }
 
 document.querySelectorAll("nav button").forEach((b) =>
@@ -666,18 +892,22 @@ el("gate-go").addEventListener("click", () => {
 });
 el("gate-key").addEventListener("keydown", (e) => { if (e.key === "Enter") el("gate-go").click(); });
 el("signout").addEventListener("click", () => signOut(""));
-el("theme").addEventListener("click", () => applyTheme(
+el("theme").addEventListener("click", () => setAttr("data-theme", THEME_STORE,
   document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+el("density").addEventListener("click", () => setAttr("data-density", DENSITY_STORE,
+  document.documentElement.getAttribute("data-density") === "compact" ? "comfortable" : "compact"));
 el("k-create").addEventListener("click", createKey);
 el("reload").addEventListener("click", reloadConfig);
 
 (function boot() {
-  let stored = "", theme = "dark";
+  let stored = "", theme = "dark", density = "comfortable";
   try {
     stored = localStorage.getItem(KEY_STORE) || "";
     theme = localStorage.getItem(THEME_STORE) || "dark";
+    density = localStorage.getItem(DENSITY_STORE) || "comfortable";
   } catch (e) { /* private mode */ }
-  applyTheme(theme);
+  document.documentElement.setAttribute("data-theme", theme);
+  document.documentElement.setAttribute("data-density", density);
   // A gateway with no keys configured is open; try it before asking for one.
   fetch("/admin/status", { headers: stored ? { "x-api-key": stored } : {} })
     .then((r) => r.ok ? signIn(stored) : signOut(""))
