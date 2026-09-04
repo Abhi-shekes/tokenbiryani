@@ -1,0 +1,81 @@
+# tokenbiryani — full configuration reference.
+# Every value shown is the default unless noted.
+
+server:
+  host: 127.0.0.1
+  port: 8787
+  # Required to bind anything but loopback. Also requires at least one key below.
+  allow_remote: false
+  request_timeout_seconds: 600
+
+routing:
+  # sticky_headroom | headroom | cost_tiered | priority | least_loaded | round_robin
+  strategy: sticky_headroom
+  affinity_ttl_seconds: 1800
+  # Token estimates are multiplied by this before becoming a lease. Above 1.0 means
+  # reserving slightly too much, which is the safe direction.
+  estimate_safety_margin: 1.15
+  weights:
+    affinity: 0.40
+    headroom: 0.40
+    priority: 0.10
+    load: 0.15
+    errors: 0.20
+    cost: 0.10
+
+retry:
+  max_attempts: 3
+  max_accounts: 3
+  deadline_seconds: 120
+  backoff_base_seconds: 0.25
+  backoff_max_seconds: 8
+  # How long to hold a stream before its first content delta, waiting to see whether it
+  # fails. Past this point failover is no longer invisible to the client.
+  first_token_grace_seconds: 20
+
+breaker:
+  failure_threshold: 5
+  cooldown_seconds: 30
+
+queue:
+  max_size: 128
+  default_max_wait_seconds: 60
+
+observability:
+  # Prompts are sensitive. Turning this on logs request bodies.
+  log_bodies: false
+  event_buffer: 500
+
+accounts:
+  - id: acct-01
+    type: anthropic_api
+    api_key: ${ANTHROPIC_API_KEY}
+    base_url: https://api.anthropic.com
+    priority: 0.0        # nudge for the `priority` strategy
+    cost_tier: 1.0       # relative cost, used by `cost_tiered`
+    models: ["*"]        # allowlist; supports trailing wildcards
+    max_concurrency: 16
+    spend_cap_usd: null  # needs `pricing` below to be enforceable
+    enabled: true
+
+  - id: acct-02
+    type: anthropic_api
+    api_key: ${ANTHROPIC_API_KEY_2}
+    cost_tier: 1.0
+
+keys:
+  - key: ${TOKENBIRYANI_KEY}
+    name: default
+    models: ["*"]
+    pool: []             # empty means every account
+    rpm: null
+    spend_cap_usd: null
+
+# USD per million tokens. Operator-supplied on purpose: the gateway ships no price list,
+# so it can never bill you against numbers that went stale in a release.
+# pricing:
+#   claude-opus-4-*:
+#     input: 15.0
+#     output: 75.0
+#     cache_read: 1.5
+#     cache_write: 18.75

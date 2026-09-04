@@ -1,0 +1,377 @@
+"""A scriptable stand-in for the Anthropic API.
+
+Every routing behaviour in this gateway is a reaction to something an upstream did:
+a 429 with a retry-after, a 529, a stream that dies mid-flight, a limit header
+counting down. None of that is testable against the real API without spending money
+and waiting on real reset windows, so it lives here instead.
+
+Ships in the package on purpose — contributors adding a routing strategy need it.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import datetime as _dt
+import json
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Any, Deque, Dict, List, Optional
+
+import httpx
+
+
+def _rfc3339(epoch: float) -> str:
+    return (
+        _dt.datetime.fromtimestamp(epoch, tz=_dt.timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+@dataclass
+class Behavior:
+    """One scripted upstream response."""
+
+    kind: str = "ok"
+    retry_after: Optional[float] = None
+    status: Optional[int] = None
+    message: str = ""
+    text: str = "ok"
+    deltas: int = 3
+    delay: float = 0.0
+    #: for stream_disconnect: how many chunks to emit before dying
+    chunks_before_failure: int = 0
+    input_tokens: int = 100
+    output_tokens: int = 20
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+
+def ok(text: str = "ok", **kwargs: Any) -> Behavior:
+    return Behavior(kind="ok", text=text, **kwargs)
+
+
+def rate_limit(retry_after: float = 30.0) -> Behavior:
+    return Behavior(kind="rate_limit", retry_after=retry_after)
+
+
+def overloaded() -> Behavior:
+    return Behavior(kind="overloaded")
+
+
+def server_error(status: int = 500) -> Behavior:
+    return Behavior(kind="server_error", status=status)
+
+
+def invalid_request(message: str = "messages: field required") -> Behavior:
+    return Behavior(kind="invalid_request", message=message)
+
+
+def auth_error() -> Behavior:
+    return Behavior(kind="auth_error")
+
+
+def model_not_permitted() -> Behavior:
+    return Behavior(kind="model_not_permitted")
+
+
+def transport_error() -> Behavior:
+    return Behavior(kind="transport_error")
+
+
+def stream_disconnect(after_chunks: int = 0) -> Behavior:
+    """Die mid-stream. after_chunks=0 dies before any content delta."""
+    return Behavior(kind="stream_disconnect", chunks_before_failure=after_chunks)
+
+
+def slow_stream(delay: float = 0.05, deltas: int = 3) -> Behavior:
+    return Behavior(kind="ok", delay=delay, deltas=deltas)
+
+
+@dataclass
+class MockAccount:
+    api_key: str
+    requests_limit: int = 1000
+    input_limit: int = 100_000
+    output_limit: int = 20_000
+    window_seconds: float = 60.0
+
+    requests_remaining: Optional[int] = None
+    input_remaining: Optional[int] = None
+    output_remaining: Optional[int] = None
+    reset_at: Optional[float] = None
+
+    script: Deque[Behavior] = field(default_factory=deque)
+    received: List[Dict[str, Any]] = field(default_factory=list)
+    #: set to suppress rate-limit headers, mimicking an upstream that reports nothing
+    emit_limit_headers: bool = True
+
+    def __post_init__(self) -> None:
+        if self.requests_remaining is None:
+            self.requests_remaining = self.requests_limit
+        if self.input_remaining is None:
+            self.input_remaining = self.input_limit
+        if self.output_remaining is None:
+            self.output_remaining = self.output_limit
+        if self.reset_at is None:
+            self.reset_at = time.time() + self.window_seconds
+
+    def headers(self) -> Dict[str, str]:
+        if not self.emit_limit_headers:
+            return {}
+        reset = _rfc3339(self.reset_at or time.time())
+        return {
+            "anthropic-ratelimit-requests-limit": str(self.requests_limit),
+            "anthropic-ratelimit-requests-remaining": str(max(0, self.requests_remaining or 0)),
+            "anthropic-ratelimit-requests-reset": reset,
+            "anthropic-ratelimit-input-tokens-limit": str(self.input_limit),
+            "anthropic-ratelimit-input-tokens-remaining": str(max(0, self.input_remaining or 0)),
+            "anthropic-ratelimit-input-tokens-reset": reset,
+            "anthropic-ratelimit-output-tokens-limit": str(self.output_limit),
+            "anthropic-ratelimit-output-tokens-remaining": str(
+                max(0, self.output_remaining or 0)
+            ),
+            "anthropic-ratelimit-output-tokens-reset": reset,
+        }
+
+    def consume(self, behavior: Behavior) -> None:
+        self.requests_remaining = max(0, (self.requests_remaining or 0) - 1)
+        self.input_remaining = max(0, (self.input_remaining or 0) - behavior.input_tokens)
+        self.output_remaining = max(0, (self.output_remaining or 0) - behavior.output_tokens)
+
+    def exhaust(self) -> None:
+        """Drain this account's budget without changing its reset time."""
+        self.requests_remaining = 0
+        self.input_remaining = 0
+        self.output_remaining = 0
+
+
+class MockAnthropic:
+    """Serves the Messages API well enough to exercise every routing path."""
+
+    def __init__(self, accounts: Optional[Dict[str, MockAccount]] = None) -> None:
+        self.accounts: Dict[str, MockAccount] = accounts or {}
+        self.calls: List[Dict[str, Any]] = []
+
+    def add(self, name: str, api_key: str, **kwargs: Any) -> MockAccount:
+        account = MockAccount(api_key=api_key, **kwargs)
+        self.accounts[name] = account
+        return account
+
+    def by_key(self, api_key: str) -> Optional[MockAccount]:
+        for account in self.accounts.values():
+            if account.api_key == api_key:
+                return account
+        return None
+
+    def script(self, name: str, *behaviors: Behavior) -> None:
+        self.accounts[name].script.extend(behaviors)
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self._handle)
+
+    def client(self, **kwargs: Any) -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=self.transport(), **kwargs)
+
+    # ---- request handling ----------------------------------------------------
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        """Public entry point, so the mock can also be driven by a real ASGI server."""
+        return self._handle(request)
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        api_key = request.headers.get("x-api-key", "")
+        account = self.by_key(api_key)
+        if account is None:
+            return httpx.Response(
+                401,
+                json={
+                    "type": "error",
+                    "error": {"type": "authentication_error", "message": "invalid x-api-key"},
+                },
+            )
+
+        try:
+            body = json.loads(request.content.decode("utf-8")) if request.content else {}
+        except ValueError:
+            body = {}
+        account.received.append(body)
+        self.calls.append({"key": api_key, "path": request.url.path, "body": body})
+
+        behavior = account.script.popleft() if account.script else Behavior(kind="ok")
+
+        if behavior.kind == "transport_error":
+            raise httpx.ConnectError("mock upstream refused the connection", request=request)
+
+        if behavior.kind == "rate_limit":
+            account.requests_remaining = 0
+            account.input_remaining = 0
+            headers = dict(account.headers())
+            if behavior.retry_after is not None:
+                headers["retry-after"] = str(int(behavior.retry_after))
+            return httpx.Response(
+                429,
+                headers=headers,
+                json={
+                    "type": "error",
+                    "error": {"type": "rate_limit_error", "message": "rate limit exceeded"},
+                },
+            )
+
+        if behavior.kind == "overloaded":
+            return httpx.Response(
+                529,
+                headers=account.headers(),
+                json={
+                    "type": "error",
+                    "error": {"type": "overloaded_error", "message": "overloaded"},
+                },
+            )
+
+        if behavior.kind == "server_error":
+            return httpx.Response(
+                behavior.status or 500,
+                headers=account.headers(),
+                json={
+                    "type": "error",
+                    "error": {"type": "api_error", "message": "internal server error"},
+                },
+            )
+
+        if behavior.kind == "invalid_request":
+            return httpx.Response(
+                400,
+                headers=account.headers(),
+                json={
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": behavior.message or "bad request",
+                    },
+                },
+            )
+
+        if behavior.kind == "auth_error":
+            return httpx.Response(
+                401,
+                json={
+                    "type": "error",
+                    "error": {"type": "authentication_error", "message": "invalid api key"},
+                },
+            )
+
+        if behavior.kind == "model_not_permitted":
+            return httpx.Response(
+                403,
+                headers=account.headers(),
+                json={
+                    "type": "error",
+                    "error": {
+                        "type": "permission_error",
+                        "message": "your account does not have access to this model",
+                    },
+                },
+            )
+
+        account.consume(behavior)
+
+        if body.get("stream"):
+            return httpx.Response(
+                200,
+                headers=dict(account.headers(), **{"content-type": "text/event-stream"}),
+                content=self._stream(behavior, body),
+            )
+
+        if behavior.kind == "stream_disconnect":
+            # Non-streaming equivalent of a dropped connection.
+            raise httpx.ReadError("mock upstream dropped the connection", request=request)
+
+        return httpx.Response(
+            200,
+            headers=account.headers(),
+            json=self._message_body(behavior, body),
+        )
+
+    def _message_body(self, behavior: Behavior, request_body: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": "msg_mock",
+            "type": "message",
+            "role": "assistant",
+            "model": request_body.get("model", "mock-model"),
+            "content": [{"type": "text", "text": behavior.text}],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": behavior.input_tokens,
+                "output_tokens": behavior.output_tokens,
+                "cache_read_input_tokens": behavior.cache_read_tokens,
+                "cache_creation_input_tokens": behavior.cache_creation_tokens,
+            },
+        }
+
+    async def _stream(self, behavior: Behavior, request_body: Dict[str, Any]):
+        def frame(event: str, data: Dict[str, Any]) -> bytes:
+            return (f"event: {event}\ndata: {json.dumps(data)}\n\n").encode()
+
+        emitted = 0
+
+        yield frame(
+            "message_start",
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_mock",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": request_body.get("model", "mock-model"),
+                    "content": [],
+                    "usage": {
+                        "input_tokens": behavior.input_tokens,
+                        "output_tokens": 0,
+                        "cache_read_input_tokens": behavior.cache_read_tokens,
+                        "cache_creation_input_tokens": behavior.cache_creation_tokens,
+                    },
+                },
+            },
+        )
+        emitted += 1
+        if behavior.kind == "stream_disconnect" and emitted > behavior.chunks_before_failure:
+            raise httpx.ReadError("mock upstream dropped the stream")
+
+        yield frame(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+        )
+        emitted += 1
+        if behavior.kind == "stream_disconnect" and emitted > behavior.chunks_before_failure:
+            raise httpx.ReadError("mock upstream dropped the stream")
+
+        for index in range(behavior.deltas):
+            if behavior.delay:
+                await asyncio.sleep(behavior.delay)
+            yield frame(
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": behavior.text + str(index)},
+                },
+            )
+            emitted += 1
+            if behavior.kind == "stream_disconnect" and emitted > behavior.chunks_before_failure:
+                raise httpx.ReadError("mock upstream dropped the stream")
+
+        yield frame("content_block_stop", {"type": "content_block_stop", "index": 0})
+        yield frame(
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": behavior.output_tokens},
+            },
+        )
+        yield frame("message_stop", {"type": "message_stop"})
