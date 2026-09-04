@@ -1,0 +1,69 @@
+# Container configuration. Mounted at /app/tokenbiryani.yaml by docker-compose.yml.
+#
+# The gateway re-reads this file when its mtime changes, so edits here land without
+# a restart. Accounts you add from the console are stored in Redis instead and are
+# not written back here — the file stays yours.
+
+server:
+  host: 0.0.0.0
+  port: 8787
+  # Binding 0.0.0.0 is the whole point of a container, so this must be true and at
+  # least one key must exist — otherwise the gateway refuses to start rather than
+  # expose your credentials to the network. Compose publishes to loopback only.
+  allow_remote: true
+
+routing:
+  strategy: sticky_headroom
+
+store:
+  # Shared with any other replica in the compose project, and it outlives the
+  # container — which is why TOKENBIRYANI_SECRET_KEY needs to as well.
+  backend: redis
+  url: redis://redis:6379/0
+  # Only used if you switch backend to sqlite. /state is a named volume.
+  path: /state/tokenbiryani.db
+  secret_key_path: /state/tokenbiryani.key
+
+accounts:
+  # Points at the bundled mock upstream, so `docker compose up` comes up green with
+  # no credentials and no spend. Delete these three once you have real accounts.
+  - id: mock-01
+    name: Mock upstream 1
+    type: anthropic_api
+    api_key: key-01
+    base_url: http://mock:9911
+  - id: mock-02
+    name: Mock upstream 2
+    type: anthropic_api
+    api_key: key-02
+    base_url: http://mock:9911
+  - id: mock-03
+    name: Mock upstream 3
+    type: anthropic_api
+    api_key: key-03
+    base_url: http://mock:9911
+    cost_tier: 2.5
+
+  # A real account. Uncomment with ANTHROPIC_API_KEY set — or skip this entirely
+  # and add it from the console, which stores it encrypted and lets you name, test
+  # and rotate it in place.
+  # - id: acct-01
+  #   name: Production key
+  #   type: anthropic_api
+  #   api_key: ${ANTHROPIC_API_KEY}
+
+keys:
+  - key: ${TOKENBIRYANI_KEY}
+    name: default
+    # Required to reach /admin/* — the pool, the request inspector, the usage
+    # charts and account management. Issue tenant keys without it.
+    admin: true
+
+# Costs are reported, and spend caps enforced, only for models named here. The
+# gateway ships no price list, so it can never bill you against stale numbers.
+# pricing:
+#   claude-sonnet-5:
+#     input: 3.0
+#     output: 15.0
+#     cache_read: 0.30
+#     cache_write: 3.75

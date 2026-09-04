@@ -32,9 +32,10 @@ site/
 Thumbs.db
 
 # --- runtime state ---
-# The operator's own config: it holds real credentials. tokenbiryani.example.yaml
-# and docker/tokenbiryani.yaml are the tracked templates.
-tokenbiryani.yaml
+# The operator's own config: it holds real credentials. Anchored to the repo root
+# with a leading slash — unanchored, this matched docker/tokenbiryani.yaml too, and
+# quietly kept the file `docker compose up` depends on out of the repository.
+/tokenbiryani.yaml
 *.db
 *.sqlite3
 # SQLite's WAL sidecars. *.db does not cover these, and they were committed by

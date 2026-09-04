@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Bring the whole thing up locally: a mock Anthropic on :9911, and the gateway in
-# front of it reading the checked-in tokenbiryani.yaml.
+# Bring the whole thing up locally, without Docker: a mock Anthropic on :9911, and
+# the gateway in front of it. `docker compose up` is the other way to do this; this
+# one is for when you would rather not involve a container.
 #
-# The committed config points its three accounts at 127.0.0.1:9911, so without the
-# mock running every request connection-refuses and the console looks broken. This
-# script is the missing half.
+# tokenbiryani.yaml is gitignored — it is where real credentials go — so a fresh
+# clone has none, and this writes a mock-backed one on first run.
+#
+# That config points its accounts at 127.0.0.1:9911, so without the mock running
+# every request connection-refuses and the console looks broken. This script is the
+# missing half.
 #
 #   scripts/dev.sh            # mock + gateway
 #   scripts/dev.sh --no-mock  # gateway only, for when you point the config at real keys
@@ -33,6 +37,30 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 listening() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3>&- 3<&-; }
+
+# A fresh clone has no tokenbiryani.yaml. Write one pointed at the mock, so this
+# script works immediately instead of failing on a file the repo cannot ship.
+if [ ! -f tokenbiryani.yaml ]; then
+  KEY="bir_dev_$("$PY" -c 'import secrets;print(secrets.token_urlsafe(18))')"
+  cat > tokenbiryani.yaml <<YAML
+# Written by scripts/dev.sh. Gitignored: this is where real credentials go.
+# The three accounts below point at the bundled mock upstream, so nothing here
+# reaches Anthropic and nothing costs money. Replace them, or add real accounts
+# from the console.
+server: {host: 127.0.0.1, port: $GATEWAY_PORT}
+routing: {strategy: sticky_headroom}
+store: {backend: sqlite, path: manual-test.db, secret_key_path: manual-test.key}
+accounts:
+  - {id: acct-01, name: Mock 1, type: anthropic_api, api_key: key-01, base_url: "http://127.0.0.1:$UPSTREAM_PORT"}
+  - {id: acct-02, name: Mock 2, type: anthropic_api, api_key: key-02, base_url: "http://127.0.0.1:$UPSTREAM_PORT"}
+  - {id: acct-03, name: Mock 3, type: anthropic_api, api_key: key-03, base_url: "http://127.0.0.1:$UPSTREAM_PORT", cost_tier: 2.5}
+keys:
+  - {key: $KEY, name: admin, admin: true}
+pricing:
+  claude-*: {input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75}
+YAML
+  echo "  wrote tokenbiryani.yaml    (mock-backed; gitignored)"
+fi
 
 wait_for() {
   local url=$1 name=$2 tries=0

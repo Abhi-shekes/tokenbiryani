@@ -24,9 +24,9 @@ Three services, all in `docker-compose.yml`:
 
 `./src` is bind-mounted and uvicorn watches it, so saving a Python file on the host
 restarts the gateway in the container in about a second. The console's HTML and CSS
-are read per request — a browser refresh is enough. `docker/tokenbiryani.yaml` is
-mounted too, and the gateway re-reads it on mtime change, so config edits need no
-restart either.
+are re-read whenever they change on disk, so editing those needs only a browser
+refresh — no restart, and no build step. `docker/tokenbiryani.yaml` is mounted too,
+and the gateway re-reads it on mtime change, so config edits land the same way.
 
 `./tests` is mounted as well, so the suite runs against the running stack:
 

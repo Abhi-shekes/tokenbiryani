@@ -399,3 +399,81 @@ label.f .t em{font-style:normal;text-transform:none;letter-spacing:normal;
 .seg-ctl button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 /* Refetch holds the previous render rather than flashing a skeleton. */
 .stale{opacity:.45;transition:opacity .18s var(--ease)}
+
+/* ============================================================================
+   The mark
+   ---------------------------------------------------------------------------
+   A sealed, layered pot: dum biryani, and a pool of accounts, in one shape. The
+   vessel takes currentColor so it sits on any surface; the lid and the layers
+   are the accent. Drawn in strokes at a 32 viewBox because it has to survive a
+   16px favicon — an emoji did not, and neither did anything with more detail.
+   ========================================================================= */
+.mark{width:26px;height:26px;flex:none;color:var(--text-2)}
+.brand .mark{color:var(--text-2)}
+.mark-lockup{display:flex;align-items:center;gap:9px}
+.mark-lockup b{font-size:15px;font-weight:650;letter-spacing:-.02em}
+.mark-lockup .mark{width:28px;height:28px}
+
+/* ============================================================================
+   Landing page
+   ---------------------------------------------------------------------------
+   The only thing an unauthenticated visitor sees, so it has to say what this is
+   before it asks for anything. Two columns on a desktop — the pitch, and the one
+   field that gets you in — stacking on a phone with the sign-in card first,
+   because someone on a phone already knows what they came for.
+   ========================================================================= */
+.lp{min-height:100vh;display:flex;flex-direction:column;
+  background:
+    radial-gradient(900px 420px at 82% -8%, var(--accent-soft), transparent 62%),
+    radial-gradient(700px 380px at 8% 108%, var(--surface-2), transparent 60%),
+    var(--bg)}
+.lp-top{display:flex;align-items:center;justify-content:space-between;gap:var(--s4);
+  padding:var(--s5) var(--s6);flex-wrap:wrap}
+.lp-addr{font-size:11.5px;color:var(--text-3)}
+.lp-addr:empty{display:none}
+
+.lp-main{flex:1;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,.85fr);
+  gap:var(--s7);align-items:center;
+  padding:var(--s5) var(--s6) var(--s7);max-width:1180px;width:100%;margin:0 auto}
+@media(max-width:940px){
+  .lp-main{grid-template-columns:minmax(0,1fr);gap:var(--s6);align-items:start}
+  .lp-auth{order:-1}
+}
+
+.lp-eyebrow{display:inline-block;font-size:11px;font-weight:650;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--accent);
+  background:var(--accent-soft);border-radius:99px;padding:5px 11px;margin-bottom:var(--s4)}
+.lp-hero h1{font-size:clamp(28px,4.4vw,42px);line-height:1.12;letter-spacing:-.03em;
+  margin-bottom:var(--s4)}
+.lp-lede{color:var(--text-2);font-size:15px;line-height:1.65;max-width:52ch}
+
+.lp-points{list-style:none;margin:var(--s6) 0 0;padding:0;
+  display:flex;flex-direction:column;gap:var(--s4)}
+.lp-points li{display:flex;gap:13px;align-items:flex-start}
+.lp-points svg{width:19px;height:19px;flex:none;color:var(--accent);margin-top:2px}
+.lp-points b{display:block;font-size:13.5px;font-weight:600;margin-bottom:3px}
+.lp-points span{color:var(--text-3);font-size:12.5px;line-height:1.6;display:block}
+
+.lp-auth .card{background:var(--surface)}
+.lp-auth h2{font-size:17px}
+.lp-sub{color:var(--text-3);font-size:12.5px;margin-top:5px;line-height:1.55}
+.lp-go{width:100%;justify-content:center;padding:10px}
+
+.lp-help{border-top:1px solid var(--border);padding-top:var(--s3);margin-top:var(--s1)}
+.lp-help summary{cursor:pointer;font-size:12px;color:var(--text-3);
+  list-style:none;display:flex;align-items:center;gap:6px}
+.lp-help summary::-webkit-details-marker{display:none}
+.lp-help summary::before{content:"+";font-family:var(--mono);color:var(--accent)}
+.lp-help[open] summary::before{content:"−"}
+.lp-help summary:hover{color:var(--text)}
+.lp-help p{color:var(--text-3);font-size:12px;line-height:1.65;margin:var(--s3) 0}
+
+.lp-foot{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;
+  padding:var(--s4) var(--s6) var(--s5);border-top:1px solid var(--border);
+  font-size:11.5px;color:var(--text-3)}
+.lp-dot{opacity:.5}
+@media(max-width:640px){.lp-top,.lp-main,.lp-foot{padding-left:var(--s4);padding-right:var(--s4)}}
+.lp-endpoint{margin-top:var(--s6);max-width:52ch}
+.lp-endpoint-label{display:block;font-size:10.5px;font-weight:650;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--text-3);margin-bottom:var(--s2)}
+.lp-endpoint .code{background:var(--surface);font-size:11.5px;line-height:1.9}
