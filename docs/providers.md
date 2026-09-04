@@ -7,25 +7,35 @@ All types share one pool, so a request can fail over from an API key to Bedrock.
 | `anthropic_api` | `x-api-key` | native SSE | — |
 | `bedrock` | SigV4 | binary event-stream, decoded to SSE | `pip install "tokenbiryani[bedrock]"` |
 | `vertex` | bearer token | native SSE | `pip install "tokenbiryani[vertex]"` |
-| `oauth` | subscription session | native SSE | separate package — see below |
+| `oauth` | subscription session | native SSE | login from the console — see below |
 
 ## Subscription sessions
 
-`contrib/tokenbiryani-oauth/` adds `type: oauth`, backed by a Claude subscription
-session rather than an API key. It is a separate distribution: core does not depend on
-it, and `pip install tokenbiryani` does not bring it.
+`type: oauth` is backed by a Claude subscription session rather than an API key. Add
+one from the console: **Accounts → Add account → Claude subscription**. The login is
+OAuth 2.0 + PKCE and the gateway refreshes the session for you.
 
-Understand the trade before installing it. Subscription sessions send no
+It ships **disabled**: `oauth.client_id`, `oauth.authorize_url` and `oauth.token_url`
+are empty by default, because Anthropic does not publish the endpoints its first-party
+clients use and a guess would look like a working feature. [docs/oauth.md](oauth.md)
+covers how to fill them in.
+
+Understand the trade before you do. Subscription sessions send no
 `anthropic-ratelimit-*` headers, and those headers are the entire routing signal. Such
 an account keeps failover and prompt-cache affinity, and loses headroom-aware routing,
 binding leases, admission control and the capacity horizon — falling back to reactive
 429 backoff, which is what a generic proxy already does.
 
-Those accounts must be configured `observable_limits: false`, or they read as
-permanently full and starve every API-key account in the pool.
+`observable_limits` is forced false for these accounts rather than left to you: read
+as permanently full, such an account wins every routing comparison and starves every
+API-key account in the pool.
 
 There is also a terms question, and it is not the same question for one account as for
-several. The package README covers both.
+several. [docs/oauth.md](oauth.md) covers both.
+
+> `contrib/tokenbiryani-oauth` introduced this account type and is now deprecated —
+> core absorbed it, including its `credentials_path`, `token_env` and `access_token`
+> options, so existing configuration keeps working unchanged.
 
 ## The one place bodies are rewritten
 

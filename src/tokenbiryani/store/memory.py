@@ -9,6 +9,10 @@ from typing import Deque, Dict, List, Optional, Tuple
 
 from .base import StateStore
 
+#: How many usage rows this store keeps. Roughly a day of steady traffic, and a
+#: few megabytes. The persistent backends keep 90 days instead.
+USAGE_CAPACITY = 50_000
+
 
 class MemoryStateStore(StateStore):
     def __init__(self) -> None:
@@ -17,6 +21,7 @@ class MemoryStateStore(StateStore):
         self._ledger: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
         self._keys: Dict[str, Dict[str, object]] = {}
         self._accounts: Dict[str, Dict[str, object]] = {}
+        self._usage: List[Dict[str, object]] = []
         self._lock = asyncio.Lock()
 
     async def get_affinity(self, session_key: str) -> Optional[str]:
@@ -64,6 +69,25 @@ class MemoryStateStore(StateStore):
                 if key.startswith(prefix)
             }
 
+    async def record_usage(self, sample: Dict[str, object]) -> None:
+        async with self._lock:
+            self._usage.append(dict(sample))
+            # Bounded, unlike the persistent backends: this store is already
+            # "everything disappears on restart", so the ceiling is memory, not days.
+            if len(self._usage) > USAGE_CAPACITY:
+                del self._usage[: len(self._usage) - USAGE_CAPACITY]
+
+    async def usage_rows(
+        self, since: float, until: float, account_id: Optional[str] = None
+    ) -> List[Dict[str, object]]:
+        async with self._lock:
+            return [
+                dict(row)
+                for row in self._usage
+                if since <= _at(row) < until
+                and (account_id is None or row.get("account_id") == account_id)
+            ]
+
     async def put_key(self, record: Dict[str, object]) -> None:
         async with self._lock:
             self._keys[str(record["name"])] = dict(record)
@@ -97,3 +121,9 @@ class MemoryStateStore(StateStore):
         kept = [entry for entry in entries if entry[0] >= cutoff]
         self._ledger[key] = kept
         return sum(amount for _, amount in kept)
+
+
+def _at(row: Dict[str, object]) -> float:
+    """Rows are `Dict[str, object]` at this boundary; read the timestamp safely."""
+    value = row.get("at")
+    return float(value) if isinstance(value, (int, float)) else 0.0

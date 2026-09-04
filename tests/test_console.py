@@ -6,7 +6,7 @@ import httpx
 from conftest import build, make_config
 
 from tokenbiryani.api.app import create_app
-from tokenbiryani.dashboard import console_html
+from tokenbiryani.dashboard import console_css, console_html
 
 
 def client_for(mock, account_ids=("a", "b")):
@@ -44,18 +44,20 @@ def test_console_covers_every_designed_surface():
     for panel in ("pool", "requests", "accounts", "keys", "settings"):
         assert f'data-panel="{panel}"' in html
     # The screens the UI design calls for, by their distinguishing element.
+    assert 'data-panel="guide"' in html, "connect-a-client guide"
     assert 'id="hz"' in html, "capacity horizon"
     assert 'id="inspector"' in html, "request inspector"
     assert 'id="gate"' in html, "first-run key gate"
 
 
 def test_console_uses_the_validated_state_palette():
-    html = console_html()
+    """The palette lives in the stylesheet now; the values themselves are unchanged."""
+    css = console_css()
     for token in ("--ready:#2FA47A", "--cool:#4A85DE", "--crit:#DA6355", "--cache:#9068DE"):
-        assert token in html, token
+        assert token in css, token
     # Both themes are defined, not one flipped.
-    assert ':root[data-theme="light"]' in html
-    assert "--ready:#12795B" in html
+    assert ':root[data-theme="light"]' in css
+    assert "--ready:#12795B" in css
 
 
 def test_console_reads_events_with_fetch_not_eventsource():

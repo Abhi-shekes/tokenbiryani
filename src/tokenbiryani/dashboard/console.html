@@ -2,314 +2,247 @@
 <html lang="en" data-theme="dark" data-density="comfortable">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tokenbiryani console</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#127835;</text></svg>">
-<style>
-/* Dark-first: operators run this beside a terminal. Light is fully supported.
-   State colours are validated for deuteranopia/protanopia/tritanopia; the brand
-   saffron is deliberately off the state ramp so it can mean "interactive". */
-:root{
-  --bg:#0B0E13; --panel:#131820; --panel2:#191F29;
-  --rule:#232B36; --rule2:#333D4A;
-  --ink:#E8ECF2; --mid:#A7B2C0; --dim:#6B7686;
-  --ready:#2FA47A; --ready-t:#4FD09B; --ready-w:#0F2620;
-  --cool:#4A85DE;  --cool-t:#7FADEE;  --cool-w:#111B2B;
-  --crit:#DA6355;  --crit-t:#F08878;  --crit-w:#2A1614;
-  --cache:#9068DE; --cache-t:#B18CF0; --cache-w:#1D1630;
-  --brand:#E9A94A;
-  --row:9px; --gap:16px;
-}
-:root[data-theme="light"]{
-  --bg:#F4F6F9; --panel:#FFFFFF; --panel2:#EBEEF3;
-  --rule:#DDE2E9; --rule2:#C0C8D2;
-  --ink:#111721; --mid:#46505F; --dim:#6E7887;
-  --ready:#12795B; --ready-t:#0E6047; --ready-w:#E3F1EC;
-  --cool:#1F63C4;  --cool-t:#184F9E;  --cool-w:#E4ECFA;
-  --crit:#A93125;  --crit-t:#8C271D;  --crit-w:#F8E6E3;
-  --cache:#7A4FD0; --cache-t:#5F3BA6; --cache-w:#EFE9FB;
-  --brand:#A6620F;
-}
-:root[data-density="compact"]{ --row:4px; --gap:10px; }
-
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-  font-family:Archivo,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
-.mono,code{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-variant-numeric:tabular-nums}
-a{color:var(--brand)}
-button{font-family:inherit;font-size:12px;cursor:pointer}
-:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:3px}
-
-header{display:flex;align-items:center;gap:14px;padding:10px 18px;background:var(--panel);
-  border-bottom:1px solid var(--rule);flex-wrap:wrap}
-.wm{font-weight:700;color:var(--brand);letter-spacing:-.01em}
-.addr{font-size:10.5px;color:var(--dim)}
-header .spacer{flex:1}
-.iconbtn{background:transparent;border:1px solid var(--rule2);color:var(--mid);
-  border-radius:5px;padding:4px 9px}
-.iconbtn:hover{color:var(--ink);border-color:var(--dim)}
-.live{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--dim)}
-.live i{width:6px;height:6px;border-radius:50%;background:var(--dim);display:block}
-.live.on i{background:var(--ready)}
-.live.off i{background:var(--crit)}
-
-nav{display:flex;gap:2px;padding:0 12px;background:var(--panel);
-  border-bottom:1px solid var(--rule);overflow-x:auto}
-nav button{background:none;border:0;color:var(--dim);padding:9px 12px;
-  border-bottom:2px solid transparent;font-weight:500;white-space:nowrap}
-nav button.on{color:var(--ink);border-bottom-color:var(--brand)}
-
-main{padding:16px 18px 48px;max-width:1400px;margin:0 auto}
-.hidden{display:none!important}
-
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;
-  background:var(--rule);border:1px solid var(--rule);border-radius:7px;overflow:hidden;
-  margin-bottom:var(--gap)}
-.stat{background:var(--panel);padding:11px 13px;display:flex;flex-direction:column;gap:3px}
-.stat .lb{font-size:9.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
-.stat .vl{font-size:19px;font-weight:500;letter-spacing:-.02em;line-height:1.15}
-.stat .vl small{font-size:11px;color:var(--dim);font-weight:400}
-.stat .sub{font-size:10px;color:var(--dim)}
-.stat.cache .vl{color:var(--cache-t)}
-.stat.warn .vl{color:var(--crit-t)}
-
-.card{background:var(--panel);border:1px solid var(--rule);border-radius:7px;
-  margin-bottom:var(--gap);overflow:hidden}
-.card>h2{margin:0;padding:11px 15px;border-bottom:1px solid var(--rule);font-size:11.5px;
-  font-weight:600;display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
-.card>h2 .note{font-size:10px;color:var(--dim);font-weight:400}
-.card .body{padding:13px 15px}
-h3{font-size:11px;margin:18px 0 6px;color:var(--ink)}
-
-/* capacity horizon */
-.hz{display:flex;align-items:flex-end;gap:2px;height:78px;position:relative;
-  background:linear-gradient(to top,var(--rule) 1px,transparent 1px) 0 100%/100% 25% repeat-y}
-.hz div{flex:1;background:var(--ready);border-radius:4px 4px 0 0;min-width:5px;min-height:2px;
-  opacity:.85}
-.hz div:hover{opacity:1;background:var(--ready-t)}
-.hz div.step{box-shadow:inset 0 2px 0 var(--ready-t)}
-.hzx{display:flex;gap:2px;margin-top:6px;border-top:1px solid var(--rule);padding-top:5px}
-.hzx span{flex:1;text-align:center;font-size:8.5px;color:var(--dim)}
-.hznote{margin-top:9px;font-size:10px;color:var(--dim);display:flex;gap:16px;flex-wrap:wrap}
-.hznote b{color:var(--mid);font-weight:500}
-
-table{width:100%;border-collapse:collapse}
-th{text-align:left;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
-  font-weight:600;padding:0 10px 8px;white-space:nowrap}
-th.r{text-align:right}
-td{border-top:1px solid var(--rule);padding:var(--row) 10px;color:var(--mid);vertical-align:middle}
-td.r{text-align:right;white-space:nowrap;color:var(--ink)}
-tbody tr:hover td{background:var(--panel2)}
-tr.click{cursor:pointer}
-tr.click:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
-.scroll{overflow-x:auto}
-.aid{color:var(--ink);font-weight:500;display:flex;align-items:center;gap:6px}
-.ameta{font-size:10px;color:var(--dim)}
-
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:9.5px;font-weight:600;
-  letter-spacing:.07em;text-transform:uppercase;padding:3px 7px;border-radius:3px;white-space:nowrap}
-.pill i{width:5px;height:5px;border-radius:50%;display:block}
-.pill.ready{background:var(--ready-w);color:var(--ready-t)} .pill.ready i{background:var(--ready)}
-.pill.cooling{background:var(--cool-w);color:var(--cool-t)} .pill.cooling i{background:var(--cool)}
-.pill.disabled{background:var(--crit-w);color:var(--crit-t)} .pill.disabled i{background:var(--crit)}
-.tag{font-size:8.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
-  color:var(--cache-t);background:var(--cache-w);padding:2px 5px;border-radius:3px}
-.tag.blind{color:var(--dim);background:var(--panel2)}
-
-.meters{display:flex;flex-direction:column;gap:3px;min-width:150px}
-.mtr{display:flex;align-items:center;gap:7px}
-.mtr .k{font-size:8.5px;color:var(--dim);width:16px}
-.mtr .tr{flex:1;height:4px;background:var(--rule);border-radius:2px;overflow:hidden}
-.mtr .tr i{display:block;height:100%;border-radius:2px}
-.mtr .v{font-size:9.5px;color:var(--mid);width:64px;text-align:right}
-.spark{display:block}
-
-.stream .row{display:grid;grid-template-columns:64px 92px minmax(0,1fr) 64px 58px 56px;
-  gap:10px;padding:var(--row) 15px;border-top:1px solid var(--rule);font-size:10.5px;
-  color:var(--mid);align-items:center;cursor:pointer}
-.stream .row:hover{background:var(--panel2)}
-.stream .row:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
-.stream .row .m{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.stream .row.brk{background:var(--cache-w)}
-.stream .head{cursor:default;color:var(--dim);font-size:9.5px;letter-spacing:.09em;
-  text-transform:uppercase;font-weight:600;font-family:Archivo,sans-serif}
-.ok{color:var(--ready-t)} .er{color:var(--crit-t)} .ca{color:var(--cache-t)} .dm{color:var(--dim)}
-@media(max-width:720px){.stream .row{grid-template-columns:1fr 1fr;gap:3px 10px}}
-
-.chain{display:flex;align-items:center;flex-wrap:wrap;gap:0;margin-bottom:4px}
-.node{background:var(--panel2);border:1px solid var(--rule2);border-radius:5px;padding:7px 11px;
-  display:flex;flex-direction:column;gap:2px}
-.node .n{font-size:11px;color:var(--ink)} .node .s{font-size:9.5px}
-.node.fail{border-color:var(--crit)} .node.fail .s{color:var(--crit-t)}
-.node.win{border-color:var(--ready)} .node.win .s{color:var(--ready-t)}
-.arrow{padding:0 9px;font-size:10px;color:var(--dim)}
-.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:1px;
-  background:var(--rule);border:1px solid var(--rule);border-radius:7px;overflow:hidden;margin-top:13px}
-.kv>div{background:var(--panel);padding:9px 12px;display:flex;flex-direction:column;gap:2px}
-.kv .lb{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
-.kv .vl{font-size:13px;color:var(--ink)}
-.kv .vl.ca{color:var(--cache-t)}
-tr.won td{background:var(--ready-w)}
-tr.won td:first-child{color:var(--ready-t)}
-
-.form{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
-.field{display:flex;flex-direction:column;gap:4px}
-.field label{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);font-weight:600}
-input,select{background:var(--panel2);border:1px solid var(--rule2);border-radius:5px;
-  padding:7px 9px;color:var(--ink);font-family:inherit;font-size:12px;min-width:0}
-.primary{background:var(--brand);color:#1A1204;border:0;border-radius:5px;padding:8px 14px;font-weight:600}
-.primary:disabled{opacity:.5;cursor:default}
-.danger{background:transparent;border:1px solid var(--crit);color:var(--crit-t);border-radius:5px;padding:4px 9px}
-.notice{padding:10px 13px;border-radius:6px;font-size:11.5px;margin-bottom:12px;border:1px solid}
-.notice.err{background:var(--crit-w);border-color:var(--crit);color:var(--crit-t)}
-.notice.ok{background:var(--ready-w);border-color:var(--ready);color:var(--ready-t)}
-.notice.warn{background:var(--cool-w);border-color:var(--cool);color:var(--cool-t)}
-.empty{padding:26px 15px;text-align:center;color:var(--dim);font-size:12px;line-height:1.7}
-.empty b{color:var(--mid);font-weight:500}
-
-/* single-account pool degrades to a card rather than a one-row table */
-.solo{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;
-  background:var(--rule)}
-.solo>div{background:var(--panel);padding:11px 13px;display:flex;flex-direction:column;gap:3px}
-.solo .lb{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
-.solo .vl{font-size:15px;color:var(--ink)}
-
-/* gate + first run */
-.gate{max-width:460px;margin:64px auto;display:flex;flex-direction:column;gap:14px;text-align:center}
-.gate h1{font-size:19px;margin:0;letter-spacing:-.015em}
-.gate p{margin:0;color:var(--dim);font-size:12px;line-height:1.55}
-.gate .row{display:flex;gap:8px}
-.gate input{flex:1}
-pre{background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:11px 13px;
-  font-size:10.5px;color:var(--mid);text-align:left;overflow-x:auto;margin:0;line-height:1.8;
-  white-space:pre-wrap;word-break:break-all}
-pre b{color:var(--ready-t);font-weight:400}
-.steps{display:flex;gap:5px;width:100%}
-.steps i{flex:1;height:2px;border-radius:1px;background:var(--rule2);display:block}
-.steps i.on{background:var(--brand)}
-.copy{background:transparent;border:1px solid var(--rule2);color:var(--mid);border-radius:5px;
-  padding:3px 8px;font-size:10.5px}
-
-@media (prefers-reduced-motion:no-preference){
-  .hz div{transition:height .3s ease}
-  .stream .row{transition:background .12s ease}
-}
-</style>
+<link rel="stylesheet" href="/console.css">
 </head>
 <body>
 
-<!-- Sign-in: the shell has no data, so this is the only thing an unauthenticated
-     visitor can see. -->
-<div id="gate" class="gate hidden">
-  <h1>tokenbiryani console</h1>
-  <p>Paste an admin key. It is kept in this browser only and sent as <code>x-api-key</code>.</p>
-  <div class="row">
-    <input id="gate-key" type="password" placeholder="bir_…" autocomplete="off">
-    <button class="primary" id="gate-go">Connect</button>
-  </div>
-  <div id="gate-msg"></div>
-  <pre># a key needs admin: true to reach /admin
+<!-- ============================================================================
+     Sign-in. The shell carries no data, so this is all an unauthenticated
+     visitor can see.
+     ========================================================================= -->
+<div id="gate" class="onboard hidden">
+  <div class="box">
+    <div class="brand">
+      <span class="dot">&#127835;</span>
+      <span><b>tokenbiryani</b><span>pooling gateway for Claude accounts</span></span>
+    </div>
+    <h2>Connect to your gateway</h2>
+    <p class="lede">Paste an admin key. It stays in this browser and is sent as an
+      <code>x-api-key</code> header — never in a URL, never to anywhere else.</p>
+    <div class="row" style="flex-wrap:nowrap">
+      <input id="gate-key" type="password" placeholder="bir_…" autocomplete="off"
+        style="flex:1;background:var(--surface-2);border:1px solid var(--border);
+               border-radius:var(--r-sm);padding:10px 12px;color:var(--text)">
+      <button class="btn primary" id="gate-go">Connect</button>
+    </div>
+    <div id="gate-msg"></div>
+    <pre class="code"><span class="c"># a key needs admin: true to reach /admin</span>
 keys:
   - key: <b>bir_…</b>
     name: default
     <b>admin: true</b></pre>
+  </div>
 </div>
 
-<div id="app" class="hidden">
-<header>
-  <span class="wm">tokenbiryani</span>
-  <span class="addr mono" id="addr"></span>
-  <span class="spacer"></span>
-  <span class="live" id="live"><i></i><span id="live-text">connecting</span></span>
-  <button class="iconbtn" id="density" title="Row density">density</button>
-  <button class="iconbtn" id="theme">theme</button>
-  <button class="iconbtn" id="signout">sign out</button>
-</header>
-
-<nav>
-  <button data-tab="pool" class="on">Pool</button>
-  <button data-tab="requests">Requests</button>
-  <button data-tab="accounts">Accounts</button>
-  <button data-tab="keys">Keys</button>
-  <button data-tab="settings">Settings</button>
-</nav>
-
-<main>
-  <div id="banner"></div>
-
-  <section data-panel="pool">
-    <div id="onboarding"></div>
-    <div id="pool-body">
-      <div class="stats" id="stats"></div>
-      <div class="card">
-        <h2>Capacity horizon <span class="note">projected input tokens available · next 60 min</span></h2>
-        <div class="body">
-          <div class="hz" id="hz"></div>
-          <div class="hzx" id="hzx"></div>
-          <div class="hznote" id="hznote"></div>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Accounts <span class="note" id="pool-note"></span></h2>
-        <div id="accounts-wrap" class="scroll"></div>
-      </div>
-      <div class="card stream">
-        <h2>Live requests <span class="note">newest first · click one to inspect</span></h2>
-        <div id="stream"></div>
-      </div>
+<!-- ============================================================================
+     First run: no accounts. The activation funnel, not an empty table.
+     ========================================================================= -->
+<div id="onboarding" class="onboard hidden">
+  <div class="box">
+    <div class="brand">
+      <span class="dot">&#127835;</span>
+      <span><b>tokenbiryani</b><span>let's get one account in</span></span>
     </div>
-  </section>
-
-  <section data-panel="requests" class="hidden">
-    <div class="card stream">
-      <h2>Requests <span class="note">click one to see why it went where it did</span></h2>
-      <div id="requests"></div>
-    </div>
-    <div id="inspector"></div>
-  </section>
-
-  <section data-panel="accounts" class="hidden"><div id="account-detail"></div></section>
-
-  <section data-panel="keys" class="hidden">
-    <div class="card">
-      <h2>Mint a key</h2>
-      <div class="body">
-        <div class="form">
-          <div class="field"><label for="k-name">Name</label><input id="k-name" placeholder="tenant-1"></div>
-          <div class="field"><label for="k-pool">Pool</label><input id="k-pool" placeholder="acct-01,acct-02"></div>
-          <div class="field"><label for="k-rpm">RPM</label><input id="k-rpm" type="number" min="1" style="width:88px"></div>
-          <div class="field"><label for="k-cap">Cap USD</label><input id="k-cap" type="number" step="0.01" style="width:96px"></div>
-          <div class="field"><label for="k-pri">Priority</label>
-            <select id="k-pri"><option value="interactive">interactive</option><option value="batch">batch</option></select>
-          </div>
-          <div class="field"><label for="k-admin">Admin</label>
-            <select id="k-admin"><option value="false">no</option><option value="true">yes</option></select>
-          </div>
-          <button class="primary" id="k-create">Create</button>
-        </div>
-        <div id="k-result"></div>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Keys</h2>
-      <div class="scroll"><table id="keys"></table></div>
-    </div>
-  </section>
-
-  <section data-panel="settings" class="hidden">
-    <div class="card">
-      <h2>Configuration <span class="note">edit the file; the gateway re-reads it</span></h2>
-      <div class="body">
-        <div class="form"><button class="primary" id="reload">Reload config</button></div>
-        <div id="reload-result"></div>
-        <div class="kv" id="settings"></div>
-      </div>
-    </div>
-  </section>
-</main>
+    <div class="steps" id="ob-steps"><i class="on"></i><i></i><i></i></div>
+    <div id="ob-body"></div>
+  </div>
 </div>
+
+<!-- ============================================================================
+     The console.
+     ========================================================================= -->
+<div id="app" class="shell hidden">
+  <aside class="side">
+    <div class="brand">
+      <span class="dot">&#127835;</span>
+      <span><b>tokenbiryani</b><span class="addr mono" id="addr"></span></span>
+    </div>
+
+    <nav class="nav">
+      <div class="sep">Monitor</div>
+      <button data-tab="pool" class="on">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+        Overview</button>
+      <button data-tab="usage">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+        Usage</button>
+      <button data-tab="requests">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+        Requests</button>
+
+      <div class="sep">Manage</div>
+      <button data-tab="accounts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>
+        Accounts</button>
+      <button data-tab="keys">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v4"/></svg>
+        Keys</button>
+
+      <div class="sep">Setup</div>
+      <button data-tab="guide">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v14h16V5z"/><path d="M9 9h6M9 13h6"/></svg>
+        Connect a client</button>
+      <button data-tab="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+        Settings</button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="status" id="live"><i></i><span id="live-text">connecting</span></div>
+      <div class="row">
+        <button class="chip" id="theme">Theme</button>
+        <button class="chip" id="density" title="Row density">Density</button>
+      </div>
+      <button class="chip" id="signout">Sign out</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h1 id="view-title">Overview</h1>
+      <span class="sub" id="view-sub"></span>
+    </div>
+
+    <div class="view" id="banner-wrap"><div id="banner"></div></div>
+
+    <!-- ---- Overview ---- -->
+    <section class="view" data-panel="pool">
+      <div class="stack">
+        <div class="tiles" id="stats"></div>
+
+        <div class="card">
+          <header><h3>Capacity horizon</h3>
+            <span class="note">projected input tokens available · next 60 min</span></header>
+          <div class="pad">
+            <div class="hz" id="hz"></div>
+            <div class="hzx" id="hzx"></div>
+            <div class="hznote" id="hznote"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <header><h3>Accounts</h3><span class="note" id="pool-note"></span></header>
+          <div id="accounts-wrap" class="scroll pad"></div>
+        </div>
+
+        <div class="card">
+          <header><h3>Live requests</h3>
+            <span class="note">newest first · click one to see why it went where it did</span></header>
+          <div class="stream" id="stream"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- Usage ----
+         One filter row scoping every chart below it, never per-card filters. -->
+    <section class="view hidden" data-panel="usage">
+      <div class="filters">
+        <div class="seg-ctl" id="u-range">
+          <button data-window="1h">1h</button>
+          <button data-window="24h" class="on">24h</button>
+          <button data-window="7d">7d</button>
+          <button data-window="30d">30d</button>
+        </div>
+        <div class="seg-ctl" id="u-group">
+          <button data-group="account" class="on">By account</button>
+          <button data-group="model">By model</button>
+          <button data-group="key">By key</button>
+        </div>
+        <span class="note" id="u-note"></span>
+      </div>
+      <div class="stack" id="u-body"></div>
+    </section>
+
+    <!-- ---- Requests ---- -->
+    <section class="view hidden" data-panel="requests">
+      <div class="stack">
+        <div class="card">
+          <header><h3>Requests</h3>
+            <span class="note">click one to see why it went where it did</span></header>
+          <div class="stream" id="requests"></div>
+        </div>
+        <div id="inspector"></div>
+      </div>
+    </section>
+
+    <!-- ---- Accounts ---- -->
+    <section class="view hidden" data-panel="accounts">
+      <div class="stack">
+        <div class="card">
+          <header>
+            <h3>Pool</h3>
+            <button class="btn primary" id="acct-add">Add account</button>
+          </header>
+          <div class="scroll" id="accounts-table"></div>
+        </div>
+        <div id="acct-msg"></div>
+        <div id="account-detail"></div>
+      </div>
+    </section>
+
+    <!-- ---- Keys ---- -->
+    <section class="view hidden" data-panel="keys">
+      <div class="stack">
+        <div class="card">
+          <header><h3>Mint a key</h3>
+            <span class="note">virtual keys your clients use — real credentials never leave the gateway</span></header>
+          <div class="pad stack">
+            <div class="grid g3">
+              <label class="f">Name<input id="k-name" placeholder="tenant-1"></label>
+              <label class="f">Pool<input id="k-pool" placeholder="acct-01,acct-02">
+                <span class="hint">blank = every account</span></label>
+              <label class="f">RPM<input id="k-rpm" type="number" min="1" placeholder="unlimited"></label>
+              <label class="f">Cap USD<input id="k-cap" type="number" step="0.01" placeholder="none"></label>
+              <label class="f">Priority
+                <select id="k-pri"><option value="interactive">interactive</option><option value="batch">batch</option></select></label>
+              <label class="f">Admin
+                <select id="k-admin"><option value="false">no</option><option value="true">yes</option></select>
+                <span class="hint">admin keys can reach /admin</span></label>
+            </div>
+            <div class="row"><button class="btn primary" id="k-create">Create key</button></div>
+            <div id="k-result"></div>
+          </div>
+        </div>
+        <div class="card">
+          <header><h3>Keys</h3></header>
+          <div class="scroll pad"><table id="keys"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- Connect a client ---- -->
+    <section class="view hidden" data-panel="guide">
+      <div class="guide" id="guide"></div>
+    </section>
+
+    <!-- ---- Settings ---- -->
+    <section class="view hidden" data-panel="settings">
+      <div class="stack">
+        <div class="card">
+          <header><h3>Configuration</h3>
+            <span class="note">accounts added here are stored in the gateway; the YAML file is re-read on demand</span></header>
+          <div class="pad stack">
+            <div class="row"><button class="btn" id="reload">Reload config file</button></div>
+            <div id="reload-result"></div>
+            <div class="kv" id="settings"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="modal-root"></div>
 
 <script>
 "use strict";
@@ -319,7 +252,64 @@ const el = (id) => document.getElementById(id);
 
 const state = {
   key: "", tab: "pool", snapshot: null, requests: [], streaming: false,
-  stopStream: null, timer: null, ticker: null,
+  stopStream: null, timer: null, ticker: null, onboardStep: 0,
+  usage: null, window: "24h", groupBy: "account", oauthConfig: null,
+  //: name -> categorical slot, assigned once and never reassigned, so a range
+  //: change that reorders the groups cannot repaint them.
+  slots: {},
+};
+
+const TITLES = {
+  pool: ["Overview", "can I make a request right now — and if not, when?"],
+  usage: ["Usage", "what the pool has actually spent, and on what"],
+  requests: ["Requests", "every request, and the routing decision behind it"],
+  accounts: ["Accounts", "add, name, test and rotate the credentials in the pool"],
+  keys: ["Keys", "virtual keys your clients authenticate with"],
+  guide: ["Connect a client", "point Claude Code or the SDK at this gateway"],
+  settings: ["Settings", "what this gateway is currently running"],
+};
+
+/* The account types this console can create. Each one is a form, so adding an
+   upstream is a new entry here plus its adapter — no other UI change. */
+const ACCOUNT_TYPES = {
+  anthropic_api: {
+    label: "Anthropic API key",
+    blurb: "A console key (sk-ant-…). Reports rate-limit headers, so every meter, the " +
+           "capacity horizon and headroom routing work at full strength.",
+    fields: [
+      { name: "api_key", label: "API key", type: "password", required: true,
+        placeholder: "sk-ant-…", hint: "Encrypted before it is stored. Never shown again." },
+      { name: "base_url", label: "Base URL", placeholder: "https://api.anthropic.com",
+        hint: "Override only — leave blank for Anthropic." },
+    ],
+  },
+  oauth: {
+    label: "Claude subscription (Max / Pro)",
+    login: true,
+    blurb: "Signs in with your Claude subscription instead of an API key. Subscription " +
+           "sessions report no rate-limit headers, so this account gets failover and " +
+           "prompt-cache affinity but no headroom routing, no admission control and no " +
+           "capacity horizon.",
+    fields: [],
+  },
+  bedrock: {
+    label: "AWS Bedrock",
+    blurb: "Signed with SigV4 from the ambient AWS credential chain. Leave the key " +
+           "blank unless you are using a static credential.",
+    fields: [
+      { name: "opt.region", label: "Region", placeholder: "us-east-1", required: true },
+      { name: "opt.profile", label: "AWS profile", placeholder: "default",
+        hint: "Blank uses the ambient credential chain." },
+    ],
+  },
+  vertex: {
+    label: "Google Vertex AI",
+    blurb: "Bearer token from Application Default Credentials.",
+    fields: [
+      { name: "opt.project", label: "GCP project", placeholder: "my-project", required: true },
+      { name: "opt.region", label: "Region", placeholder: "us-central1" },
+    ],
+  },
 };
 
 // ---- helpers -----------------------------------------------------------------
@@ -338,6 +328,16 @@ const tokens = (n) => {
   return String(n);
 };
 const usd = (n) => n == null ? "—" : "$" + Number(n).toFixed(n < 1 ? 4 : 2);
+const num = (n) => n == null ? "0" : Number(n).toLocaleString();
+/** Axis ticks want round money, not the four decimals a single request needs. */
+const usdAxis = (n) => {
+  if (n == null) return "—";
+  const value = Number(n);
+  if (value === 0) return "$0";
+  if (value >= 100) return "$" + Math.round(value).toLocaleString();
+  if (value >= 1) return "$" + value.toFixed(2);
+  return "$" + value.toFixed(3);
+};
 const hhmmss = (epoch) => new Date(epoch * 1000).toTimeString().slice(0, 8);
 const now = () => Date.now() / 1000;
 
@@ -357,7 +357,7 @@ function tick() {
 
 function banner(message, kind) {
   el("banner").innerHTML = message
-    ? `<div class="notice ${kind || "err"}">${esc(message)}</div>` : "";
+    ? `<div class="note ${kind || "err"}">${esc(message)}</div>` : "";
 }
 
 async function api(path, options) {
@@ -377,7 +377,16 @@ async function api(path, options) {
   return response.status === 204 ? null : response.json();
 }
 
-// ---- pool --------------------------------------------------------------------
+async function copy(text, into) {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (into) into.innerHTML = '<div class="note ok">Copied.</div>';
+  } catch (e) {
+    if (into) into.innerHTML = '<div class="note warn">Copy failed — select the text above.</div>';
+  }
+}
+
+// ---- overview ----------------------------------------------------------------
 function renderStats(snapshot) {
   const pool = snapshot.pool, stats = snapshot.stats;
   const cooling = pool.cooling, disabled = pool.disabled;
@@ -386,13 +395,13 @@ function renderStats(snapshot) {
       `${pool.ready} of ${pool.total} accounts`, ""],
     ["Next reset", countdown(pool.next_reset_seconds), "earliest window", ""],
     ["Queue", String(snapshot.queue.depth), "max " + snapshot.queue.max_size,
-      snapshot.queue.depth > 0 ? "warn" : ""],
+      snapshot.queue.depth > 0 ? "bad" : ""],
     ["Cache hit", pct(stats.cache_hit_rate), stats.cache_breaks + " breaks / 1h", "cache"],
     ["Spend 1h", usd(stats.spend_usd), stats.requests + " requests", ""],
     ["Failovers", String(stats.failovers), stats.errors + " errors / 1h",
-      stats.errors > 0 ? "warn" : ""],
+      stats.errors > 0 ? "bad" : ""],
   ].map(([label, value, sub, cls]) =>
-    `<div class="stat ${cls}"><span class="lb">${label}</span>
+    `<div class="tile ${cls}"><span class="lb">${label}</span>
      <span class="vl mono">${value}</span><span class="sub">${esc(sub)}</span></div>`).join("");
 
   el("pool-note").textContent =
@@ -403,11 +412,11 @@ function renderStats(snapshot) {
   if (pool.ready === 0 && pool.total > 0) {
     banner(
       disabled === pool.total
-        ? "Every account is disabled. This does not self-heal — check credentials."
+        ? "Every account is disabled. This does not self-heal — check the credentials on the Accounts screen."
         : "The whole pool is cooling. Capacity returns at the countdown above; queued requests will be served then.",
       disabled === pool.total ? "err" : "warn");
   } else if (disabled > 0) {
-    banner(`${disabled} account(s) disabled — usually a rotated key. See Accounts.`, "err");
+    banner(`${disabled} account(s) disabled — usually a rotated key. Open Accounts and press Test.`, "err");
   } else {
     banner("");
   }
@@ -420,10 +429,13 @@ function meter(label, window) {
   // Always show the percentage: it is the one figure comparable across accounts,
   // whether or not the upstream told us an absolute budget.
   const absolute = window.available == null ? "" : " " + tokens(window.available);
-  return `<span class="mtr"><span class="k mono">${label}</span>
-    <span class="tr"><i style="width:${width}%;background:var(--${kind})"></i></span>
-    <span class="v mono">${pct(window.fraction)}${absolute}</span></span>`;
+  return `<span class="bar"><span class="k">${label}</span>
+    <span class="track"><i style="width:${width}%;background:var(--${kind})"></i></span>
+    <span class="v">${pct(window.fraction)}${absolute}</span></span>`;
 }
+
+const meters = (limits) => `<span class="meter">${meter("req", limits.requests)}` +
+  `${meter("in", limits.input_tokens)}${meter("out", limits.output_tokens)}</span>`;
 
 /** Latency sparkline built from request history — no extra endpoint needed. */
 function sparkline(accountId) {
@@ -444,54 +456,39 @@ function sparkline(accountId) {
     <circle cx="${lastX}" cy="${lastY}" r="2.5" fill="var(--ready-t)"/></svg>`;
 }
 
-function accountRow(account) {
-  const limits = account.limits;
+/** Name first, id second: the id is the stable handle, the name is what you called it. */
+function identity(account) {
+  const blind = account.limits.observable === false
+    ? ' <span class="pill muted" title="this upstream reports no rate-limit headers"><i></i>no limits</span>' : "";
+  const named = account.name && account.name !== account.id;
+  return `<span class="aid"><span class="nm">${esc(account.name || account.id)}${blind}</span>
+    <span class="sub">${named ? esc(account.id) + " · " : ""}${esc(account.type)}</span></span>`;
+}
+
+function statePill(account) {
   const cooling = account.state === "cooling" && account.cooling_for != null
     ? " " + clock(account.cooling_for) : "";
-  const blind = limits.observable === false
-    ? ' <span class="tag blind" title="this upstream reports no rate-limit headers">no limits</span>' : "";
-  return `<tr class="click" tabindex="0" data-account="${esc(account.id)}"
-      aria-label="account ${esc(account.id)}, ${esc(account.state)}">
-    <td><span class="aid mono">${esc(account.id)}${blind}</span><span class="ameta">${esc(account.type)}</span></td>
-    <td><span class="pill ${esc(account.state)}"><i></i>${esc(account.state)}${cooling}</span></td>
-    <td><span class="meters">${meter("req", limits.requests)}${meter("in", limits.input_tokens)}${meter("out", limits.output_tokens)}</span></td>
-    <td class="r">${countdown(limits.input_tokens.reset_in)}</td>
-    <td class="r mono">${account.inflight}</td>
-    <td class="r mono">${account.p95_latency == null ? "—" : account.p95_latency.toFixed(2) + "s"}</td>
-    <td class="r">${sparkline(account.id)}</td>
-    <td class="r mono ca">${pct(account.cache_hit_rate)}</td>
-    <td class="r mono">${usd(account.spend_usd)}</td></tr>`;
+  return `<span class="pill ${esc(account.state)}"><i></i>${esc(account.state)}${cooling}</span>`;
 }
 
 function renderAccounts(snapshot) {
-  const wrap = el("accounts-wrap");
   const accounts = snapshot.accounts;
-
-  if (accounts.length === 1) {
-    // One account is a common way to start; a one-row table looks broken.
-    const a = accounts[0], l = a.limits;
-    wrap.innerHTML = `<div class="solo">
-      <div><span class="lb">Account</span><span class="vl mono">${esc(a.id)}</span></div>
-      <div><span class="lb">State</span><span class="vl"><span class="pill ${esc(a.state)}"><i></i>${esc(a.state)}</span></span></div>
-      <div><span class="lb">Requests</span><span class="vl mono">${pct(l.requests.fraction)}</span></div>
-      <div><span class="lb">Input</span><span class="vl mono">${pct(l.input_tokens.fraction)}</span></div>
-      <div><span class="lb">Output</span><span class="vl mono">${pct(l.output_tokens.fraction)}</span></div>
-      <div><span class="lb">Reset</span><span class="vl">${countdown(l.input_tokens.reset_in)}</span></div>
-      <div><span class="lb">Cache</span><span class="vl mono ca">${pct(a.cache_hit_rate)}</span></div>
-      <div><span class="lb">Spend</span><span class="vl mono">${usd(a.spend_usd)}</span></div>
-    </div>`;
-    wrap.querySelectorAll(".solo").forEach((node) => {
-      node.style.cursor = "pointer";
-      node.addEventListener("click", () => openAccount(accounts[0].id));
-    });
-    return;
-  }
-
-  wrap.innerHTML = `<table><thead><tr><th>Account</th><th>State</th><th>Headroom</th>
-    <th class="r">Reset</th><th class="r">Inflight</th><th class="r">p95</th>
+  el("accounts-wrap").innerHTML = `<table><thead><tr><th>Account</th><th>State</th>
+    <th>Headroom</th><th class="r">Reset</th><th class="r">Inflight</th><th class="r">p95</th>
     <th class="r">Trend</th><th class="r">Cache</th><th class="r">Spend</th></tr></thead>
-    <tbody>${accounts.map(accountRow).join("")}</tbody></table>`;
-  activate(wrap.querySelectorAll("tr[data-account]"), (node) => openAccount(node.dataset.account));
+    <tbody>${accounts.map((a) => `<tr class="click" tabindex="0" data-account="${esc(a.id)}"
+      aria-label="account ${esc(a.name || a.id)}, ${esc(a.state)}">
+      <td>${identity(a)}</td>
+      <td>${statePill(a)}</td>
+      <td>${meters(a.limits)}</td>
+      <td class="r">${countdown(a.limits.input_tokens.reset_in)}</td>
+      <td class="r mono">${a.inflight}</td>
+      <td class="r mono">${a.p95_latency == null ? "—" : a.p95_latency.toFixed(2) + "s"}</td>
+      <td class="r">${sparkline(a.id)}</td>
+      <td class="r mono ca">${pct(a.cache_hit_rate)}</td>
+      <td class="r mono">${usd(a.spend_usd)}</td></tr>`).join("")}</tbody></table>`;
+  activate(el("accounts-wrap").querySelectorAll("tr[data-account]"),
+    (node) => openAccount(node.dataset.account));
 }
 
 function renderHorizon(horizon) {
@@ -524,13 +521,442 @@ function renderHorizon(horizon) {
       : `<span>flat — nothing resets in this window</span>`);
 }
 
+// ---- charts ------------------------------------------------------------------
+// Hand-drawn inline SVG, like the sparkline and the horizon above. No library, no
+// build step, and the whole console stays one file plus one stylesheet.
+
+const SERIES_SLOTS = 8;
+const CHART_W = 980, CHART_H = 200, PAD = { t: 12, r: 64, b: 22, l: 52 };
+const PLOT_W = CHART_W - PAD.l - PAD.r, PLOT_H = CHART_H - PAD.t - PAD.b;
+
+/**
+ * Colour follows the entity, never its rank.
+ *
+ * The API returns groups ordered largest-first, so painting by array index would
+ * repaint every survivor the moment a range change reorders them — the reader who
+ * learned "acct-02 is orange" would be misled. Slots are therefore assigned once,
+ * on first sight, and kept for the life of the session.
+ */
+function colorOf(name) {
+  if (name === "—" || name === "Other") return "var(--series-other)";
+  if (!(name in state.slots)) {
+    const taken = Object.keys(state.slots).length;
+    // Past eight, everything folds into one neutral rather than cycling hues that
+    // are indistinguishable under colour-vision deficiency.
+    state.slots[name] = taken < SERIES_SLOTS ? taken + 1 : 0;
+  }
+  const slot = state.slots[name];
+  return slot === 0 ? "var(--series-other)" : `var(--series-${slot})`;
+}
+
+/** Group names capped at eight; the tail becomes one honest "Other". */
+function cappedGroups(groups) {
+  groups.forEach(colorOf);
+  const kept = groups.filter((g) => state.slots[g] !== 0).slice(0, SERIES_SLOTS);
+  return groups.length > kept.length ? kept.concat(["Other"]) : kept;
+}
+
+const valueIn = (cell, metric) => (cell && cell[metric] != null ? cell[metric] : 0);
+
+/** Round a maximum up to a clean axis ceiling, so ticks read 0 / 50k / 100k. */
+function niceCeiling(value) {
+  if (!(value > 0)) return 1;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  const scaled = value / magnitude;
+  const step = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+  return step * magnitude;
+}
+
+function axisTime(at, windowSeconds) {
+  const date = new Date(at * 1000);
+  if (windowSeconds <= 86400) return date.toTimeString().slice(0, 5);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function fullTime(at) {
+  const date = new Date(at * 1000);
+  return date.toLocaleString(undefined,
+    { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** Y gridlines plus their tick labels. Hairline, solid, one shade off surface. */
+function gridSvg(ceiling, format) {
+  let out = "";
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.t + PLOT_H - (i / 4) * PLOT_H;
+    out += `<line class="grid-line" x1="${PAD.l}" y1="${y}" x2="${PAD.l + PLOT_W}" y2="${y}"/>`;
+    out += `<text x="${PAD.l - 8}" y="${y + 3}" text-anchor="end">${esc(format(ceiling * i / 4))}</text>`;
+  }
+  return out;
+}
+
+function xLabelsSvg(buckets, windowSeconds) {
+  const every = Math.max(1, Math.ceil(buckets.length / 8));
+  return buckets.map((bucket, index) => {
+    if (index % every) return "";
+    const x = PAD.l + (index + 0.5) * (PLOT_W / buckets.length);
+    return `<text x="${x}" y="${CHART_H - 6}" text-anchor="middle">${esc(axisTime(bucket.at, windowSeconds))}</text>`;
+  }).join("");
+}
+
+const legendSvg = (groups) => `<div class="legend">${groups.map((name) =>
+  `<span><i style="background:${colorOf(name)}"></i>${esc(displayName(name))}</span>`).join("")}</div>`;
+
+/**
+ * Stacked columns: tokens or requests over time, split by group.
+ *
+ * Segments are separated by a 2px gap in the surface colour rather than a stroke
+ * around each one — the gap is the separator, and a border would add ink that is
+ * not data.
+ */
+function stackedColumns(buckets, groups, metric, format, windowSeconds) {
+  const slot = PLOT_W / buckets.length;
+  const barWidth = Math.min(24, slot * 0.7);
+  const ceiling = niceCeiling(Math.max(...buckets.map((b) =>
+    groups.reduce((sum, g) => sum + valueIn(b.by[g], metric), 0)), 0));
+
+  let marks = "";
+  buckets.forEach((bucket, index) => {
+    const x = PAD.l + index * slot + (slot - barWidth) / 2;
+    let baseline = PAD.t + PLOT_H;
+    let drawn = 0;
+    groups.forEach((name) => {
+      const value = valueIn(bucket.by[name], metric);
+      if (!value) return;
+      const height = (value / ceiling) * PLOT_H;
+      baseline -= height;
+      // 4px rounded data-end on the topmost segment only; square at the baseline.
+      const radius = drawn === 0 ? 4 : 0;
+      marks += `<rect class="seg" x="${x.toFixed(1)}" y="${baseline.toFixed(1)}"
+        width="${barWidth.toFixed(1)}" height="${Math.max(1, height).toFixed(1)}"
+        rx="${radius}" fill="${colorOf(name)}"/>`;
+      drawn++;
+    });
+    // One hit target per column, the full slot wide: far easier to land on than
+    // a 24px bar, and it drives the whole-column tooltip.
+    marks += `<rect class="hit" x="${(PAD.l + index * slot).toFixed(1)}" y="${PAD.t}"
+      width="${slot.toFixed(1)}" height="${PLOT_H}" data-bucket="${index}"/>`;
+  });
+
+  return `<svg class="chart" viewBox="0 0 ${CHART_W} ${CHART_H}" role="img">
+    ${gridSvg(ceiling, format)}
+    <line class="axis" x1="${PAD.l}" y1="${PAD.t + PLOT_H}" x2="${PAD.l + PLOT_W}" y2="${PAD.t + PLOT_H}"/>
+    ${marks}${xLabelsSvg(buckets, windowSeconds)}</svg>${legendSvg(groups)}`;
+}
+
+/**
+ * A single measure over time. One series, so no legend box — the card's title
+ * already names what is plotted.
+ */
+function lineChart(buckets, valueFn, format, windowSeconds, stroke, options) {
+  options = options || {};
+  const slot = PLOT_W / buckets.length;
+  const values = buckets.map(valueFn);
+  const present = values.filter((v) => v != null);
+  if (!present.length) {
+    return `<div class="empty"><b>No data in this range</b>
+      Send traffic through the gateway and it appears here.</div>`;
+  }
+  const ceiling = options.ceiling || niceCeiling(Math.max(...present, 0));
+  const at = (index) => PAD.l + (index + 0.5) * slot;
+  const yOf = (v) => PAD.t + PLOT_H - (v / ceiling) * PLOT_H;
+
+  // Break the path across empty buckets: a gap in traffic is a gap in the line,
+  // not a straight segment implying values nobody measured.
+  const runs = [];
+  let run = [];
+  values.forEach((value, index) => {
+    if (value == null) { if (run.length) runs.push(run); run = []; return; }
+    run.push([at(index), yOf(value)]);
+  });
+  if (run.length) runs.push(run);
+
+  const paths = runs.map((points) => points.length === 1
+    ? `<circle class="dot" cx="${points[0][0].toFixed(1)}" cy="${points[0][1].toFixed(1)}" r="4" fill="${stroke}"/>`
+    : `<path class="ln" stroke="${stroke}" d="M${points.map((p) =>
+        `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("L")}"/>`).join("");
+
+  const area = runs.map((points) => points.length < 2 ? "" :
+    `<path fill="${stroke}" opacity="0.10" d="M${points[0][0].toFixed(1)},${(PAD.t + PLOT_H).toFixed(1)}L` +
+    points.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("L") +
+    `L${points[points.length - 1][0].toFixed(1)},${(PAD.t + PLOT_H).toFixed(1)}Z"/>`).join("");
+
+  // Label the endpoint only. A number on every point goes unread.
+  let endLabel = "";
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (values[i] != null) {
+      const x = at(i), y = yOf(values[i]);
+      // Anchored into the right padding, never over the plot: a label that
+      // collides with the axis edge is worse than no label.
+      endLabel = `<circle class="dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${stroke}"/>
+        <text x="${(x + 9).toFixed(1)}" y="${Math.max(PAD.t + 4, Math.min(y + 3, PAD.t + PLOT_H)).toFixed(1)}"
+          text-anchor="start">${esc(format(values[i]))}</text>`;
+      break;
+    }
+  }
+
+  const hits = buckets.map((bucket, index) =>
+    `<rect class="hit" x="${(PAD.l + index * slot).toFixed(1)}" y="${PAD.t}"
+      width="${slot.toFixed(1)}" height="${PLOT_H}" data-bucket="${index}"/>`).join("");
+
+  return `<svg class="chart" viewBox="0 0 ${CHART_W} ${CHART_H}" role="img">
+    ${gridSvg(ceiling, options.tickFormat || format)}
+    <line class="axis" x1="${PAD.l}" y1="${PAD.t + PLOT_H}" x2="${PAD.l + PLOT_W}" y2="${PAD.t + PLOT_H}"/>
+    ${area}${paths}${endLabel}${hits}</svg>`;
+}
+
+/** Totals per group as horizontal bars — the same colour each entity has above. */
+function groupBars(totals, groups, metric, format) {
+  const ceiling = Math.max(...groups.map((g) => valueIn(totals[g], metric)), 1);
+  return `<div class="stack">${groups.map((name) => {
+    const value = valueIn(totals[name], metric);
+    return `<div style="display:flex;align-items:center;gap:10px">
+      <span style="width:34%;min-width:0;overflow:hidden;text-overflow:ellipsis;
+        white-space:nowrap;font-size:12px;color:var(--text-2)">${esc(displayName(name))}</span>
+      <span style="flex:1;height:10px;background:var(--surface-3);border-radius:99px">
+        <i style="display:block;height:100%;border-radius:99px;
+          width:${Math.max(2, (value / ceiling) * 100).toFixed(1)}%;
+          background:${colorOf(name)}"></i></span>
+      <span class="mono" style="width:76px;text-align:right;font-size:11.5px;
+        color:var(--text)">${esc(format(value))}</span></div>`;
+  }).join("")}</div>`;
+}
+
+// ---- usage screen ------------------------------------------------------------
+const displayName = (name) =>
+  (state.usage && state.usage.names && state.usage.names[name]) || name;
+
+/** Wire hover + keyboard focus on a plot. Tooltips enhance; the table carries all. */
+function attachTips(root, buckets, describe) {
+  const tip = document.createElement("div");
+  tip.className = "tip hidden";
+  root.appendChild(tip);
+  const svg = root.querySelector("svg");
+  if (!svg) return;
+
+  root.querySelectorAll("[data-bucket]").forEach((hit) => {
+    const index = Number(hit.dataset.bucket);
+    const enter = () => {
+      const html = describe(buckets[index], index);
+      if (!html) { tip.classList.add("hidden"); return; }
+      tip.innerHTML = html;
+      tip.classList.remove("hidden");
+      const box = svg.getBoundingClientRect(), area = root.getBoundingClientRect();
+      const scale = box.width / CHART_W;
+      const x = (PAD.l + (index + 0.5) * (PLOT_W / buckets.length)) * scale;
+      tip.style.left = Math.max(0, Math.min(x + 12, area.width - tip.offsetWidth - 4)) + "px";
+      tip.style.top = "8px";
+    };
+    hit.addEventListener("mouseenter", enter);
+    hit.addEventListener("focus", enter);
+    hit.setAttribute("tabindex", "0");
+  });
+  root.addEventListener("mouseleave", () => tip.classList.add("hidden"));
+}
+
+function bucketTip(bucket, groups, metric, format) {
+  const rows = groups
+    .map((name) => [name, valueIn(bucket.by[name], metric)])
+    .filter(([, value]) => value)
+    .map(([name, value]) => `<div class="tr"><span class="nm">
+      <i style="background:${colorOf(name)}"></i>${esc(displayName(name))}</span>
+      <span class="v">${esc(format(value))}</span></div>`).join("");
+  return `<b>${esc(fullTime(bucket.at))}</b>` +
+    (rows || '<div class="tr"><span class="nm">no traffic</span></div>');
+}
+
+async function loadUsage() {
+  const body = el("u-body");
+  if (body.firstChild) body.classList.add("stale");
+  try {
+    const query = `?window=${encodeURIComponent(state.window)}` +
+      `&group_by=${encodeURIComponent(state.groupBy)}`;
+    state.usage = await api("/admin/usage" + query);
+    renderUsage();
+  } catch (error) {
+    if (error.message !== "unauthorized") {
+      body.innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+    }
+  } finally {
+    body.classList.remove("stale");
+  }
+}
+
+function renderUsage() {
+  const usage = state.usage;
+  if (!usage) return;
+  const buckets = usage.buckets;
+  // The last bucket is always the one still filling — the aggregator anchors the
+  // grid so it ends in the future. Plotting it draws a cliff every time, which is
+  // an artefact of the clock rather than anything the pool did, so the charts show
+  // complete buckets only. The tiles and the totals table still cover the whole
+  // window, so nothing is hidden; the note under the filters says which is which.
+  //
+  // Unless there is no history to compare it against: on a gateway whose first
+  // requests are minutes old, *everything* is in the bucket still filling, and
+  // hiding it would show an empty chart to exactly the person checking whether
+  // any of this works. A cliff needs something to fall from.
+  const complete = buckets.slice(0, -1);
+  const partialOnly = !complete.some((b) => b.all.requests);
+  const plotted = buckets.length > 1 && !partialOnly ? complete : buckets;
+  const groups = cappedGroups(usage.groups);
+  const overall = usage.overall;
+  const windowSeconds = usage.window_seconds;
+
+  // Fold anything past the eighth series into a single "Other" bucket so the
+  // charts and the table agree about what is on screen.
+  const kept = groups.filter((g) => g !== "Other");
+  if (groups.includes("Other")) {
+    const spare = usage.groups.filter((g) => !kept.includes(g));
+    buckets.forEach((bucket) => {
+      bucket.by["Other"] = spare.reduce((acc, name) => {
+        const cell = bucket.by[name];
+        if (cell) {
+          Object.keys(cell).forEach((k) => {
+            if (typeof cell[k] === "number") acc[k] = (acc[k] || 0) + cell[k];
+          });
+        }
+        return acc;
+      }, {});
+    });
+    usage.totals["Other"] = spare.reduce((acc, name) => {
+      Object.keys(usage.totals[name] || {}).forEach((k) => {
+        if (typeof usage.totals[name][k] === "number") {
+          acc[k] = (acc[k] || 0) + usage.totals[name][k];
+        }
+      });
+      return acc;
+    }, {});
+  }
+
+  el("u-note").textContent =
+    `${plotted.length} buckets of ${Math.round(usage.bucket_seconds / 60)} min` +
+    (partialOnly
+      ? " · the current bucket is still filling"
+      : " · charts show complete buckets; totals cover all " + overall.requests +
+        " requests") +
+    " · history is kept for 90 days";
+
+  if (!overall.requests) {
+    el("u-body").innerHTML = `<div class="card"><div class="empty">
+      <b>Nothing in this range</b>
+      Send a request through the gateway, or pick a longer range.<br>
+      Usage is written to the store, so it survives a restart.</div></div>`;
+    return;
+  }
+
+  el("u-body").innerHTML = `
+    <div class="tiles">
+      <div class="tile"><span class="lb">Requests</span>
+        <span class="vl">${num(overall.requests)}</span>
+        <span class="sub">${overall.errors} errors</span></div>
+      <div class="tile"><span class="lb">Billed input</span>
+        <span class="vl">${tokens(overall.billed_input_tokens)}</span>
+        <span class="sub">${tokens(overall.output_tokens)} output</span></div>
+      <div class="tile cache"><span class="lb">Cache hit</span>
+        <span class="vl">${pct(overall.cache_hit_rate)}</span>
+        <span class="sub">${overall.cache_breaks} affinity breaks</span></div>
+      <div class="tile"><span class="lb">Cost</span>
+        <span class="vl">${usd(overall.cost_usd)}</span>
+        <span class="sub">${overall.latency_avg == null ? "—" : overall.latency_avg.toFixed(2) + "s"} average</span></div>
+    </div>
+
+    <div class="card"><header><h3>Billed input tokens</h3>
+      <span class="note">stacked by ${esc(usage.group_by)}</span></header>
+      <div class="pad plot" id="u-tokens"></div></div>
+
+    <div class="card"><header><h3>Cost</h3>
+      <span class="note">per bucket, in USD</span></header>
+      <div class="pad plot" id="u-cost"></div></div>
+
+    <div class="card"><header><h3>Cache hit rate</h3>
+      <span class="note">the number that decides the bill</span></header>
+      <div class="pad plot" id="u-cache"></div></div>
+
+    <div class="grid g2">
+      <div class="card"><header><h3>Requests</h3>
+        <span class="note">by ${esc(usage.group_by)}</span></header>
+        <div class="pad" id="u-req"></div></div>
+      <div class="card"><header><h3>Cost</h3>
+        <span class="note">by ${esc(usage.group_by)}</span></header>
+        <div class="pad" id="u-spend"></div></div>
+    </div>
+
+    <div class="card"><header><h3>Totals</h3>
+      <span class="note">every value in the charts above, as numbers</span></header>
+      <div class="scroll pad" id="u-table"></div></div>`;
+
+  el("u-tokens").innerHTML =
+    stackedColumns(plotted, groups, "billed_input_tokens", tokens, windowSeconds);
+  attachTips(el("u-tokens"), plotted,
+    (bucket) => bucketTip(bucket, groups, "billed_input_tokens", tokens));
+
+  el("u-cost").innerHTML = lineChart(
+    plotted, (b) => (b.all.requests ? b.all.cost_usd : null), usd,
+    windowSeconds, "var(--series-1)", { tickFormat: usdAxis });
+  attachTips(el("u-cost"), plotted, (bucket) =>
+    `<b>${esc(fullTime(bucket.at))}</b><div class="tr"><span class="nm">cost</span>
+     <span class="v">${esc(usd(bucket.all.cost_usd))}</span></div>
+     <div class="tr"><span class="nm">requests</span>
+     <span class="v">${bucket.all.requests}</span></div>`);
+
+  // Cache keeps the violet the design system reserves for it: it is a metric,
+  // not a health state, and not one of the categorical series either.
+  el("u-cache").innerHTML = lineChart(
+    plotted, (b) => b.all.cache_hit_rate, (v) => pct(v),
+    windowSeconds, "var(--cache)", { ceiling: 1 });
+  attachTips(el("u-cache"), plotted, (bucket) =>
+    `<b>${esc(fullTime(bucket.at))}</b><div class="tr"><span class="nm">cache hit</span>
+     <span class="v">${esc(pct(bucket.all.cache_hit_rate))}</span></div>
+     <div class="tr"><span class="nm">breaks</span>
+     <span class="v">${bucket.all.cache_breaks}</span></div>`);
+
+  el("u-req").innerHTML = groupBars(usage.totals, groups, "requests", num);
+  el("u-spend").innerHTML = groupBars(usage.totals, groups, "cost_usd", usd);
+
+  // The table view. Not a nicety: three of the light-mode series colours sit
+  // under 3:1 against white, and the rule for that is relief — every value the
+  // charts encode in colour has to be readable as a number somewhere.
+  el("u-table").innerHTML = `<table><thead><tr>
+    <th>${esc(usage.group_by)}</th><th class="r">Requests</th><th class="r">Errors</th>
+    <th class="r">Billed input</th><th class="r">Output</th><th class="r">Cache read</th>
+    <th class="r">Cache hit</th><th class="r">Breaks</th><th class="r">Avg latency</th>
+    <th class="r">Cost</th></tr></thead><tbody>
+    ${groups.map((name) => {
+      const total = usage.totals[name] || {};
+      return `<tr><td><span class="aid"><span class="nm">
+        <i style="width:9px;height:9px;border-radius:3px;display:inline-block;
+          background:${colorOf(name)}"></i> ${esc(displayName(name))}</span></span></td>
+        <td class="r mono">${num(total.requests)}</td>
+        <td class="r mono">${num(total.errors)}</td>
+        <td class="r mono">${num(total.billed_input_tokens)}</td>
+        <td class="r mono">${num(total.output_tokens)}</td>
+        <td class="r mono ca">${num(total.cache_read_tokens)}</td>
+        <td class="r mono ca">${pct(total.cache_hit_rate)}</td>
+        <td class="r mono">${num(total.cache_breaks)}</td>
+        <td class="r mono">${total.latency_avg == null ? "—" : total.latency_avg.toFixed(2) + "s"}</td>
+        <td class="r mono">${usd(total.cost_usd)}</td></tr>`;
+    }).join("")}
+    <tr><td><b>All</b></td>
+      <td class="r mono">${num(overall.requests)}</td>
+      <td class="r mono">${num(overall.errors)}</td>
+      <td class="r mono">${num(overall.billed_input_tokens)}</td>
+      <td class="r mono">${num(overall.output_tokens)}</td>
+      <td class="r mono ca">${num(overall.cache_read_tokens)}</td>
+      <td class="r mono ca">${pct(overall.cache_hit_rate)}</td>
+      <td class="r mono">${num(overall.cache_breaks)}</td>
+      <td class="r mono">${overall.latency_avg == null ? "—" : overall.latency_avg.toFixed(2) + "s"}</td>
+      <td class="r mono">${usd(overall.cost_usd)}</td></tr>
+    </tbody></table>`;
+}
+
 // ---- requests ----------------------------------------------------------------
 function requestRow(request) {
   const status = request.status == null ? "—" : request.status;
   const cls = request.error ? "er" : request.affinity_broken ? "ca" : "ok";
   const label = request.affinity_broken ? "break" : status;
   const via = request.via === "batch" ? " · batch" : "";
-  return `<div class="row mono ${request.affinity_broken ? "brk" : ""}" tabindex="0"
+  return `<div class="r ${request.affinity_broken ? "brk" : ""}" tabindex="0"
       data-request="${esc(request.request_id)}" aria-label="request at ${hhmmss(request.started_at)}">
     <span>${hhmmss(request.started_at)}</span>
     <span>${esc(request.account_id || "—")}</span>
@@ -540,7 +966,7 @@ function requestRow(request) {
     <span class="${cls}">${esc(label)}</span></div>`;
 }
 
-const STREAM_HEAD = `<div class="row head">
+const STREAM_HEAD = `<div class="r head">
   <span>Time</span><span>Account</span><span>Model</span><span>Tokens</span>
   <span>Latency</span><span>Status</span></div>`;
 
@@ -548,8 +974,8 @@ function renderRequests(target, list) {
   const node = el(target);
   if (!node) return;
   if (!list.length) {
-    node.innerHTML = `<div class="empty">No requests yet.<br>
-      <b>Send one</b> and it appears here within a second.</div>`;
+    node.innerHTML = `<div class="empty"><b>No requests yet</b>
+      Send one through the gateway and it appears here within a second.</div>`;
     return;
   }
   node.innerHTML = STREAM_HEAD + list.map(requestRow).join("");
@@ -566,9 +992,9 @@ function renderInspector(request) {
     const won = attempt.kind === "ok" || attempt.kind === "batch";
     const detail = attempt.status == null
       ? attempt.kind : `${attempt.status} ${attempt.kind}`;
-    return (index ? `<span class="arrow mono">── retry ──▶</span>` : "") +
-      `<span class="node ${won ? "win" : "fail"}"><span class="n mono">${esc(attempt.account_id)}</span>
-       <span class="s mono">${esc(detail)} · ${attempt.latency.toFixed(3)}s</span></span>`;
+    return (index ? `<span class="arrow">── retry ──▶</span>` : "") +
+      `<span class="node ${won ? "win" : "fail"}"><span class="n">${esc(attempt.account_id)}</span>
+       <span class="s">${esc(detail)} · ${attempt.latency.toFixed(3)}s</span></span>`;
   }).join("") || '<span class="dm">No attempt was made.</span>';
 
   const decision = request.decision;
@@ -589,152 +1015,452 @@ function renderInspector(request) {
   }
 
   el("inspector").innerHTML = `<div class="card">
-    <h2><span class="mono">${esc(request.request_id)}</span>
-      <span class="note">${esc(request.model)} · ${esc(request.priority)}${request.via === "batch" ? " · via batch" : ""} · ${request.attempts.length} attempt(s)</span></h2>
-    <div class="body">
+    <header><h3 class="mono">${esc(request.request_id)}</h3>
+      <span class="note">${esc(request.model)} · ${esc(request.priority)}${request.via === "batch" ? " · via batch" : ""} · ${request.attempts.length} attempt(s)</span></header>
+    <div class="pad stack">
       <div class="chain">${chain}</div>
-      ${request.queued_for ? `<p style="color:var(--dim);font-size:10.5px;margin:8px 0 0">queued ${request.queued_for.toFixed(2)}s waiting for capacity</p>` : ""}
-      ${request.affinity_broken ? `<div class="notice warn" style="margin-top:10px">Affinity broke: this
+      ${request.queued_for ? `<p style="color:var(--text-3);font-size:11px">queued ${request.queued_for.toFixed(2)}s waiting for capacity</p>` : ""}
+      ${request.affinity_broken ? `<div class="note warn">Affinity broke: this
         conversation moved off the account holding its prompt cache, so its prefix was billed fresh.</div>` : ""}
-      <h3>Routing decision${decision ? " · strategy " + esc(decision.strategy) : ""}</h3>
+      <h4>Routing decision${decision ? " · strategy " + esc(decision.strategy) : ""}</h4>
       ${table}
       <div class="kv">
-        <div><span class="lb">Input</span><span class="vl mono">${request.input_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Cache read</span><span class="vl mono ca">${request.cache_read_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Cache write</span><span class="vl mono">${request.cache_creation_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Output</span><span class="vl mono">${request.output_tokens.toLocaleString()}</span></div>
-        <div><span class="lb">Cost</span><span class="vl mono">${usd(request.cost_usd)}</span></div>
-        <div><span class="lb">Saved by cache</span><span class="vl mono ca">${usd(request.saved_usd)}</span></div>
+        <div><span class="lb">Input</span><span class="vl">${num(request.input_tokens)}</span></div>
+        <div><span class="lb">Cache read</span><span class="vl ca">${num(request.cache_read_tokens)}</span></div>
+        <div><span class="lb">Cache write</span><span class="vl">${num(request.cache_creation_tokens)}</span></div>
+        <div><span class="lb">Output</span><span class="vl">${num(request.output_tokens)}</span></div>
+        <div><span class="lb">Cost</span><span class="vl">${usd(request.cost_usd)}</span></div>
+        <div><span class="lb">Saved by cache</span><span class="vl ca">${usd(request.saved_usd)}</span></div>
       </div>
     </div></div>`;
   el("inspector").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-// ---- other panels ------------------------------------------------------------
-function renderKeys(keys) {
-  el("keys").innerHTML = `<thead><tr><th>Name</th><th>Key</th><th>Source</th><th>Models</th>
-    <th>Pool</th><th class="r">RPM</th><th class="r">Cap</th><th>Admin</th><th></th></tr></thead><tbody>` +
-    keys.map((k) => `<tr>
-      <td class="mono" style="color:var(--ink)">${esc(k.name)}</td>
-      <td class="mono dm">${esc(k.key)}</td>
-      <td>${esc(k.source)}</td>
-      <td class="mono">${esc([].concat(k.models || []).join(", "))}</td>
-      <td class="mono">${esc(Array.isArray(k.pool) ? k.pool.join(", ") : k.pool)}</td>
-      <td class="r mono">${k.rpm == null ? "—" : k.rpm}</td>
-      <td class="r mono">${k.spend_cap_usd == null ? "—" : usd(k.spend_cap_usd)}</td>
-      <td>${k.admin ? '<span class="pill disabled"><i></i>admin</span>' : ""}</td>
-      <td class="r">${k.source === "managed"
-        ? `<button class="danger" data-revoke="${esc(k.name)}">Revoke</button>`
-        : '<span class="dm" title="declared in the config file">in config</span>'}</td>
-    </tr>`).join("") + "</tbody>";
-  el("keys").querySelectorAll("[data-revoke]").forEach((button) =>
-    button.addEventListener("click", () => revokeKey(button.dataset.revoke)));
+// ---- accounts: management ----------------------------------------------------
+function renderAccountsAdmin(snapshot) {
+  const accounts = snapshot.accounts;
+  if (!accounts.length) {
+    el("accounts-table").innerHTML = `<div class="empty"><b>No accounts</b>
+      Add one and the gateway has something to route to.</div>`;
+    return;
+  }
+  el("accounts-table").innerHTML = `<div class="pad"><table>
+    <thead><tr><th>Account</th><th>State</th><th>Source</th><th class="r">Tier</th>
+      <th class="r">Priority</th><th class="r">Spend</th><th class="r">Enabled</th>
+      <th class="r">Actions</th></tr></thead>
+    <tbody>${accounts.map((a) => {
+      const managed = a.source === "managed";
+      return `<tr data-row="${esc(a.id)}">
+        <td class="click" data-open="${esc(a.id)}">${identity(a)}</td>
+        <td>${statePill(a)}</td>
+        <td>${managed ? '<span class="pill accent"><i></i>managed</span>'
+          : '<span class="pill muted" title="declared in tokenbiryani.yaml — edit it there"><i></i>in config</span>'}</td>
+        <td class="r mono">${a.cost_tier}</td>
+        <td class="r mono">${a.priority}</td>
+        <td class="r mono">${usd(a.spend_usd)}</td>
+        <td class="r"><button class="tog ${a.enabled === false ? "" : "on"}"
+          ${managed ? "" : "disabled"} data-toggle="${esc(a.id)}"
+          aria-label="${a.enabled === false ? "disabled" : "enabled"}"><i></i></button></td>
+        <td class="r"><span class="acts">
+          <button class="btn sm" data-test="${esc(a.id)}">Test</button>
+          ${managed ? `<button class="btn sm" data-edit="${esc(a.id)}">Edit</button>
+            <button class="btn sm danger" data-del="${esc(a.id)}">Delete</button>` : ""}
+        </span></td></tr>`;
+    }).join("")}</tbody></table></div>`;
+
+  const wrap = el("accounts-table");
+  wrap.querySelectorAll("[data-open]").forEach((n) =>
+    n.addEventListener("click", () => openAccount(n.dataset.open)));
+  wrap.querySelectorAll("[data-test]").forEach((n) =>
+    n.addEventListener("click", () => testAccount(n.dataset.test, n)));
+  wrap.querySelectorAll("[data-edit]").forEach((n) =>
+    n.addEventListener("click", () => accountModal(findAccount(n.dataset.edit))));
+  wrap.querySelectorAll("[data-del]").forEach((n) =>
+    n.addEventListener("click", () => deleteAccount(n.dataset.del)));
+  wrap.querySelectorAll("[data-toggle]").forEach((n) =>
+    n.addEventListener("click", () => toggleAccount(n.dataset.toggle, !n.classList.contains("on"))));
 }
 
-function renderSettings(snapshot) {
-  el("settings").innerHTML = [
-    ["Strategy", snapshot.strategy], ["Accounts", snapshot.pool.total],
-    ["Ready", snapshot.pool.ready], ["Cooling", snapshot.pool.cooling],
-    ["Disabled", snapshot.pool.disabled], ["Queue depth", snapshot.queue.depth],
-    ["Queue max", snapshot.queue.max_size]
-  ].map(([label, value]) =>
-    `<div><span class="lb">${label}</span><span class="vl mono">${esc(value)}</span></div>`).join("");
-}
+const findAccount = (id) =>
+  (state.snapshot && state.snapshot.accounts.find((a) => a.id === id)) || null;
 
-/** No accounts at all: the activation funnel, not an empty table. */
-function renderOnboarding(snapshot) {
-  const empty = snapshot.pool.total === 0;
-  el("pool-body").classList.toggle("hidden", empty);
-  if (!empty) { el("onboarding").innerHTML = ""; return; }
-  const origin = location.origin;
-  el("onboarding").innerHTML = `<div class="card"><div class="body">
-    <div class="gate" style="margin:18px auto 8px">
-      <span class="steps"><i class="on"></i><i></i><i></i></span>
-      <h1>Add your first credential</h1>
-      <p>The gateway has no accounts, so it has nothing to route to. Accounts live in
-      the config file — it is re-read automatically, so there is no restart.</p>
-      <pre>accounts:
-  - id: acct-01
-    type: anthropic_api
-    api_key: <b>\${ANTHROPIC_API_KEY}</b></pre>
-      <p>Then point your tools at the pool:</p>
-      <pre id="onboard-exports">export ANTHROPIC_BASE_URL=<b>${esc(origin)}</b>
-export ANTHROPIC_AUTH_TOKEN=<b>your key</b>
-claude</pre>
-      <div class="row" style="justify-content:center">
-        <button class="copy" id="onboard-copy">Copy the export lines</button>
-        <button class="primary" id="onboard-recheck">Check again</button>
-      </div>
-      <div id="onboard-msg"></div>
-    </div></div></div>`;
-  el("onboard-recheck").addEventListener("click", refresh);
-  el("onboard-copy").addEventListener("click", async () => {
-    const text = `export ANTHROPIC_BASE_URL=${origin}\nexport ANTHROPIC_AUTH_TOKEN=your key\nclaude`;
-    try {
-      await navigator.clipboard.writeText(text);
-      el("onboard-msg").innerHTML = '<div class="notice ok">Copied.</div>';
-    } catch (e) {
-      el("onboard-msg").innerHTML = '<div class="notice warn">Copy failed — select the text above.</div>';
-    }
-  });
-}
+function acctMsg(html) { el("acct-msg").innerHTML = html; }
 
-// ---- data --------------------------------------------------------------------
-async function refresh() {
+async function testAccount(id, button) {
+  if (button) { button.disabled = true; button.textContent = "Testing…"; }
   try {
-    const [snapshot, horizon, recent] = await Promise.all([
-      api("/admin/status"), api("/admin/horizon"), api("/admin/requests?limit=100"),
-    ]);
-    state.snapshot = snapshot;
-    // Always seed from history. The live feed only carries *new* events, so a
-    // console that relied on it alone showed an empty list until traffic arrived.
-    state.requests = recent.requests;
-    renderOnboarding(snapshot);
-    renderStats(snapshot);
-    renderAccounts(snapshot);
-    renderHorizon(horizon);
-    renderSettings(snapshot);
-    paintRequests();
-    tick();
+    const result = await api("/admin/accounts/" + encodeURIComponent(id) + "/test",
+      { method: "POST" });
+    acctMsg(result.ok
+      ? `<div class="note ok"><b>${esc(id)}</b> answered in ${result.latency}s — ${esc(result.detail)}.</div>`
+      : `<div class="note err"><b>${esc(id)}</b> could not be used: ${esc(result.detail)}${
+          result.status ? " (HTTP " + result.status + ")" : ""}.</div>`);
+    refresh();
+    return result;
   } catch (error) {
-    if (error.message !== "unauthorized") banner(error.message);
+    acctMsg(`<div class="note err">${esc(error.message)}</div>`);
+    return { ok: false, detail: error.message };
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Test"; }
   }
 }
 
-async function openRequest(id) {
-  show("requests");
-  try { renderInspector(await api("/admin/requests/" + encodeURIComponent(id))); }
-  catch (error) { banner(error.message); }
+async function toggleAccount(id, enabled) {
+  try {
+    await api("/admin/accounts/" + encodeURIComponent(id),
+      { method: "PATCH", body: JSON.stringify({ enabled: enabled }) });
+    acctMsg(`<div class="note ok"><b>${esc(id)}</b> ${enabled ? "enabled" : "disabled"}.</div>`);
+    refresh();
+  } catch (error) { acctMsg(`<div class="note err">${esc(error.message)}</div>`); }
 }
 
+async function deleteAccount(id) {
+  if (!window.confirm(`Delete ${id}? Its credential is removed from the gateway.`)) return;
+  try {
+    await api("/admin/accounts/" + encodeURIComponent(id), { method: "DELETE" });
+    acctMsg(`<div class="note ok"><b>${esc(id)}</b> deleted.</div>`);
+    el("account-detail").innerHTML = "";
+    refresh();
+  } catch (error) { acctMsg(`<div class="note err">${esc(error.message)}</div>`); }
+}
+
+// ---- accounts: the add/edit modal --------------------------------------------
+function closeModal() { el("modal-root").innerHTML = ""; }
+
+function typeFields(type, account) {
+  const spec = ACCOUNT_TYPES[type] || ACCOUNT_TYPES.anthropic_api;
+  return spec.fields.map((f) => {
+    const key = f.name.startsWith("opt.") ? f.name.slice(4) : f.name;
+    let value = "";
+    if (account && !f.name.startsWith("opt.") && f.type !== "password") {
+      value = account[key] == null ? "" : account[key];
+    }
+    return `<label class="f">
+      <span class="t">${esc(f.label)}${f.required ? "" : "<em>optional</em>"}</span>
+      <input data-field="${esc(f.name)}" type="${f.type || "text"}"
+        placeholder="${esc(f.placeholder || "")}" value="${esc(value)}"
+        autocomplete="off">
+      ${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ""}</label>`;
+  }).join("");
+}
+
+/**
+ * One modal for create and edit. `account` present means edit, in which case the
+ * id and the type are fixed — changing either is a different account.
+ */
+function accountModal(account) {
+  const editing = !!account;
+  const type = editing ? account.type : "anthropic_api";
+  el("modal-root").innerHTML = `<div class="scrim" id="scrim">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${editing ? "Edit" : "Add"} account">
+      <header><h3>${editing ? "Edit " + esc(account.name || account.id) : "Add an account"}</h3>
+        <button class="btn ghost sm" id="m-x">Close</button></header>
+      <div class="pad">
+        <label class="f">Type
+          <select id="m-type" ${editing ? "disabled" : ""}>
+            ${Object.keys(ACCOUNT_TYPES).map((k) =>
+              `<option value="${k}" ${k === type ? "selected" : ""}>${esc(ACCOUNT_TYPES[k].label)}</option>`).join("")}
+          </select>
+          <span class="hint" id="m-blurb"></span></label>
+
+        <div class="grid g2">
+          <label class="f">Name
+            <input id="m-name" placeholder="Work account" value="${esc(account ? (account.name || "") : "")}">
+            <span class="hint">What you call it. Shown everywhere.</span></label>
+          <label class="f">ID
+            <input id="m-id" placeholder="acct-02" ${editing ? "disabled" : ""}
+              value="${esc(account ? account.id : "")}">
+            <span class="hint">Stable handle used in logs and metrics.</span></label>
+        </div>
+
+        <div id="m-fields" class="grid g2"></div>
+        <div id="m-login" class="hidden stack"></div>
+
+        <div id="m-credentials" class="stack">
+        <div class="grid g3">
+          <label class="f">Cost tier
+            <input id="m-tier" type="number" step="0.1" value="${account ? account.cost_tier : 1}">
+            <span class="hint">Lower drains first under cost_tiered.</span></label>
+          <label class="f">Priority
+            <input id="m-pri" type="number" step="1" value="${account ? account.priority : 0}"></label>
+          <label class="f">Spend cap USD
+            <input id="m-cap" type="number" step="0.01" placeholder="none"
+              value="${account && account.spend_cap_usd != null ? account.spend_cap_usd : ""}"></label>
+        </div>
+
+        <label class="f">Models
+          <input id="m-models" placeholder="*"
+            value="${esc(account ? [].concat(account.models || ["*"]).join(", ") : "")}">
+          <span class="hint">Comma separated. <code>*</code> or blank means every model.</span></label>
+        </div>
+
+        <div id="m-msg"></div>
+      </div>
+      <footer>
+        <button class="btn ghost" id="m-cancel">Cancel</button>
+        <button class="btn" id="m-save-test">${editing ? "Save" : "Add"} &amp; test</button>
+        <button class="btn primary" id="m-save">${editing ? "Save" : "Add account"}</button>
+        <button class="btn primary hidden" id="m-start-login">Log in with Claude</button>
+      </footer>
+    </div></div>`;
+
+  const paintType = () => {
+    const chosen = el("m-type").value;
+    const spec = ACCOUNT_TYPES[chosen];
+    el("m-fields").innerHTML = spec.login ? "" : typeFields(chosen, account);
+    el("m-blurb").textContent = spec.blurb;
+    // A subscription is signed into, not typed in. Everything that belongs to a
+    // credential form is hidden, and the footer becomes a login button.
+    el("m-login").classList.toggle("hidden", !spec.login);
+    el("m-credentials").classList.toggle("hidden", !!spec.login);
+    el("m-save").classList.toggle("hidden", !!spec.login);
+    el("m-save-test").classList.toggle("hidden", !!spec.login);
+    el("m-start-login").classList.toggle("hidden", !spec.login);
+    if (spec.login) loadOauthConfig();
+  };
+  paintType();
+  el("m-type").addEventListener("change", paintType);
+  el("m-x").addEventListener("click", closeModal);
+  el("m-cancel").addEventListener("click", closeModal);
+  el("scrim").addEventListener("click", (e) => { if (e.target.id === "scrim") closeModal(); });
+  document.addEventListener("keydown", function onEsc(e) {
+    if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", onEsc); }
+  });
+  el("m-save").addEventListener("click", () => saveAccount(account, false));
+  el("m-save-test").addEventListener("click", () => saveAccount(account, true));
+  // onclick, not addEventListener: step two *replaces* this handler with
+  // finishLogin. An added listener would survive and re-run startLogin on the same
+  // click, wiping the code field the operator just pasted into.
+  el("m-start-login").onclick = startLogin;
+  (el("m-name") || {}).focus && el("m-name").focus();
+}
+
+function collectAccount(editing) {
+  const models = el("m-models").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const payload = {
+    name: el("m-name").value.trim(),
+    cost_tier: Number(el("m-tier").value || 1),
+    priority: Number(el("m-pri").value || 0),
+    spend_cap_usd: el("m-cap").value === "" ? null : Number(el("m-cap").value),
+    models: models.length ? models : ["*"],
+    options: {},
+  };
+  if (!editing) {
+    payload.id = el("m-id").value.trim();
+    payload.type = el("m-type").value;
+  }
+  document.querySelectorAll("#m-fields [data-field]").forEach((input) => {
+    const raw = input.value.trim();
+    const name = input.dataset.field;
+    if (name.startsWith("opt.")) {
+      if (raw) payload.options[name.slice(4)] = raw;
+    } else if (raw || !editing) {
+      // On edit, a blank API key means "keep the one you already have".
+      if (raw) payload[name] = raw;
+    }
+  });
+  return payload;
+}
+
+async function saveAccount(account, alsoTest) {
+  const editing = !!account;
+  const payload = collectAccount(editing);
+  if (!editing && !payload.id) {
+    el("m-msg").innerHTML = '<div class="note err">An account needs an ID.</div>';
+    return;
+  }
+  const buttons = ["m-save", "m-save-test"].map(el);
+  buttons.forEach((b) => { b.disabled = true; });
+  try {
+    const id = editing ? account.id : payload.id;
+    if (editing) {
+      await api("/admin/accounts/" + encodeURIComponent(id),
+        { method: "PATCH", body: JSON.stringify(payload) });
+    } else {
+      await api("/admin/accounts", { method: "POST", body: JSON.stringify(payload) });
+    }
+    closeModal();
+    acctMsg(`<div class="note ok"><b>${esc(id)}</b> ${editing ? "saved" : "added"}.</div>`);
+    await refresh();
+    if (alsoTest) await testAccount(id, null);
+    if (state.onboardStep) finishOnboarding(id);
+  } catch (error) {
+    el("m-msg").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+  } finally {
+    buttons.forEach((b) => { if (b) b.disabled = false; });
+  }
+}
+
+// ---- subscription login ------------------------------------------------------
+// Two steps, because the provider redirects a browser that carries no admin key:
+// start (get the authorize URL) then complete (hand the code back with a key).
+
+async function loadOauthConfig() {
+  const panel = el("m-login");
+  if (!panel) return;
+  panel.innerHTML = '<div class="skel" style="height:52px"></div>';
+  try {
+    const config = await api("/admin/oauth/config");
+    state.oauthConfig = config;
+    if (!config.configured) {
+      // Say exactly what is missing rather than failing on the button press.
+      panel.innerHTML = `<div class="note warn"><span>Subscription login is not
+        configured yet. Set <b>${esc(config.missing.join("</b>, <b>"))}</b> in
+        tokenbiryani.yaml, then reload the config on the Settings screen.<br>
+        These are provider endpoints this gateway deliberately does not guess at —
+        see <span class="mono">docs/oauth.md</span>.</span></div>`;
+      el("m-start-login").disabled = true;
+      return;
+    }
+    el("m-start-login").disabled = false;
+    panel.innerHTML = `<div class="note info"><span>You will be sent to Claude to
+      authorize this gateway${config.manual
+        ? ", then paste the code it shows you back here"
+        : ", and returned here automatically"}.<br>
+      Subscription sessions report no rate limits, so this account will show empty
+      meters — that is expected, not a fault.</span></div>`;
+  } catch (error) {
+    panel.innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+  }
+}
+
+async function startLogin() {
+  const id = el("m-id").value.trim();
+  if (!id) {
+    el("m-msg").innerHTML = '<div class="note err">Give the account an ID first.</div>';
+    return;
+  }
+  const button = el("m-start-login");
+  button.disabled = true;
+  try {
+    const started = await api("/admin/oauth/start", {
+      method: "POST",
+      body: JSON.stringify({ id: id, name: el("m-name").value.trim() }),
+    });
+    // Opened rather than navigated to: navigating away would lose the pending
+    // login, which lives in this page's memory until the code comes back.
+    window.open(started.authorize_url, "_blank", "noopener");
+    el("m-login").innerHTML = `<div class="note info"><span>A Claude tab is open.
+      Authorize the gateway, then paste the code below.<br>
+      If the tab did not open, <a href="${esc(started.authorize_url)}"
+      target="_blank" rel="noopener">use this link</a>.</span></div>
+      <label class="f"><span class="t">Authorization code</span>
+        <input id="m-code" placeholder="paste it here" autocomplete="off">
+        <span class="hint">Shown after you authorize. This login expires in 15 minutes.</span>
+      </label>`;
+    button.textContent = "Finish login";
+    button.onclick = () => finishLogin(started.state);
+    el("m-code").addEventListener("keydown",
+      (event) => { if (event.key === "Enter") finishLogin(started.state); });
+    el("m-code").focus();
+  } catch (error) {
+    el("m-msg").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function finishLogin(loginState) {
+  const code = (el("m-code") || {}).value ? el("m-code").value.trim() : "";
+  if (!code) {
+    el("m-msg").innerHTML = '<div class="note err">Paste the authorization code.</div>';
+    return;
+  }
+  const button = el("m-start-login");
+  button.disabled = true;
+  try {
+    const record = await api("/admin/oauth/complete", {
+      method: "POST",
+      body: JSON.stringify({ state: loginState, code: code }),
+    });
+    closeModal();
+    acctMsg(`<div class="note ok"><b>${esc(record.id)}</b> signed in. Its session will
+      be renewed automatically before it expires.</div>`);
+    await refresh();
+    if (state.onboardStep) finishOnboarding(record.id);
+  } catch (error) {
+    el("m-msg").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ---- account detail ----------------------------------------------------------
 async function openAccount(id) {
   show("accounts");
   try {
     const account = await api("/admin/accounts/" + encodeURIComponent(id));
     const kinds = Object.entries(account.error_kinds || {});
     el("account-detail").innerHTML = `<div class="card">
-      <h2><span class="mono">${esc(account.id)}</span>
-        <span class="note">${esc(account.type)} · cost tier ${account.cost_tier} · priority ${account.priority}</span></h2>
-      <div class="body">
-        ${account.disabled_reason ? `<div class="notice err">Disabled: ${esc(account.disabled_reason)}.
-          This does not self-heal — fix the credential and reload the config.</div>` : ""}
+      <header><h3>${esc(account.name || account.id)}</h3>
+        <span class="note mono">${esc(account.id)} · ${esc(account.type)} · cost tier ${account.cost_tier} · priority ${account.priority}</span></header>
+      <div class="pad stack">
+        ${account.disabled_reason ? `<div class="note err">Disabled: ${esc(account.disabled_reason)}.
+          This does not self-heal — fix the credential, then press Test.</div>` : ""}
+        ${account.observable_limits === false ? `<div class="note info"><span>This upstream reports no
+          <b>anthropic-ratelimit-*</b> headers, so its meters and the capacity horizon stay
+          empty and routing falls back to reactive backoff.</span></div>` : ""}
+        ${account.type === "oauth" ? `<div class="note ${account.can_refresh ? "info" : "warn"}">
+          <span>Subscription session${account.session_expires_at
+            ? ", expires " + esc(new Date(account.session_expires_at * 1000).toLocaleString())
+            : " with no stated expiry"}.
+          ${account.can_refresh
+            ? "It is renewed automatically before it lapses."
+            : "There is no refresh token, so it cannot be renewed — log in again when it lapses."}
+          </span></div>` : ""}
         <div class="kv">
-          <div><span class="lb">State</span><span class="vl"><span class="pill ${esc(account.state)}"><i></i>${esc(account.state)}</span></span></div>
-          <div><span class="lb">Requests</span><span class="vl mono">${account.requests_total}</span></div>
-          <div><span class="lb">Failures</span><span class="vl mono">${account.failures_total}</span></div>
-          <div><span class="lb">p95</span><span class="vl mono">${account.p95_latency == null ? "—" : account.p95_latency.toFixed(2) + "s"}</span></div>
-          <div><span class="lb">Cache hit</span><span class="vl mono ca">${pct(account.cache_hit_rate)}</span></div>
-          <div><span class="lb">Spend</span><span class="vl mono">${usd(account.spend_usd)}</span></div>
-          <div><span class="lb">Input tok</span><span class="vl mono">${tokens(account.tokens.input)}</span></div>
-          <div><span class="lb">Output tok</span><span class="vl mono">${tokens(account.tokens.output)}</span></div>
+          <div><span class="lb">State</span><span class="vl">${statePill(account)}</span></div>
+          <div><span class="lb">Requests</span><span class="vl">${num(account.requests_total)}</span></div>
+          <div><span class="lb">Failures</span><span class="vl">${num(account.failures_total)}</span></div>
+          <div><span class="lb">p95</span><span class="vl">${account.p95_latency == null ? "—" : account.p95_latency.toFixed(2) + "s"}</span></div>
+          <div><span class="lb">Cache hit</span><span class="vl ca">${pct(account.cache_hit_rate)}</span></div>
+          <div><span class="lb">Spend</span><span class="vl">${usd(account.spend_usd)}</span></div>
+          <div><span class="lb">Input tok</span><span class="vl">${tokens(account.tokens.input)}</span></div>
+          <div><span class="lb">Output tok</span><span class="vl">${tokens(account.tokens.output)}</span></div>
         </div>
-        ${kinds.length ? `<h3>Errors by class</h3><div class="kv">${kinds.map(([k, v]) =>
-          `<div><span class="lb">${esc(k)}</span><span class="vl mono">${v}</span></div>`).join("")}</div>` : ""}
+        ${kinds.length ? `<h4>Errors by class</h4><div class="kv">${kinds.map(([k, v]) =>
+          `<div><span class="lb">${esc(k)}</span><span class="vl">${v}</span></div>`).join("")}</div>` : ""}
+        <div class="row">
+          <button class="btn" data-test="${esc(account.id)}">Test credential</button>
+          ${account.source === "managed"
+            ? `<button class="btn" data-edit="${esc(account.id)}">Edit</button>
+               <button class="btn danger" data-del="${esc(account.id)}">Delete</button>`
+            : `<span class="dm" style="font-size:11.5px">Declared in tokenbiryani.yaml — edit it there and reload.</span>`}
+        </div>
       </div></div>
-      <div class="card stream"><h2>Recent requests <span class="note">including attempts it failed</span></h2>
-        <div id="account-requests"></div></div>`;
+      <div class="card"><header><h3>Recent requests</h3>
+        <span class="note">including attempts it failed</span></header>
+        <div class="stream" id="account-requests"></div></div>`;
     renderRequests("account-requests", account.recent_requests || []);
+    const detail = el("account-detail");
+    detail.querySelectorAll("[data-test]").forEach((n) =>
+      n.addEventListener("click", () => testAccount(n.dataset.test, n)));
+    detail.querySelectorAll("[data-edit]").forEach((n) =>
+      n.addEventListener("click", () => accountModal(findAccount(n.dataset.edit))));
+    detail.querySelectorAll("[data-del]").forEach((n) =>
+      n.addEventListener("click", () => deleteAccount(n.dataset.del)));
   } catch (error) { banner(error.message); }
+}
+
+// ---- keys --------------------------------------------------------------------
+function renderKeys(keys) {
+  el("keys").innerHTML = `<thead><tr><th>Name</th><th>Key</th><th>Source</th><th>Models</th>
+    <th>Pool</th><th class="r">RPM</th><th class="r">Cap</th><th>Admin</th><th></th></tr></thead><tbody>` +
+    keys.map((k) => `<tr>
+      <td style="color:var(--text)">${esc(k.name)}</td>
+      <td class="mono dm">${esc(k.key)}</td>
+      <td>${esc(k.source)}</td>
+      <td class="mono">${esc([].concat(k.models || []).join(", "))}</td>
+      <td class="mono">${esc(Array.isArray(k.pool) ? k.pool.join(", ") : k.pool)}</td>
+      <td class="r mono">${k.rpm == null ? "—" : k.rpm}</td>
+      <td class="r mono">${k.spend_cap_usd == null ? "—" : usd(k.spend_cap_usd)}</td>
+      <td>${k.admin ? '<span class="pill accent"><i></i>admin</span>' : ""}</td>
+      <td class="r">${k.source === "managed"
+        ? `<button class="btn sm danger" data-revoke="${esc(k.name)}">Revoke</button>`
+        : '<span class="dm" title="declared in the config file">in config</span>'}</td>
+    </tr>`).join("") + "</tbody>";
+  el("keys").querySelectorAll("[data-revoke]").forEach((button) =>
+    button.addEventListener("click", () => revokeKey(button.dataset.revoke)));
 }
 
 async function loadKeys() {
@@ -756,12 +1482,12 @@ async function createKey() {
   button.disabled = true;
   try {
     const created = await api("/admin/keys", { method: "POST", body: JSON.stringify(payload) });
-    el("k-result").innerHTML = `<div class="notice ok">Copy this now — it is stored hashed
-      and cannot be shown again.<br><code>${esc(created.key)}</code></div>`;
+    el("k-result").innerHTML = `<div class="note ok"><span>Copy this now — it is stored hashed
+      and cannot be shown again.<br><code>${esc(created.key)}</code></span></div>`;
     ["k-name", "k-pool", "k-rpm", "k-cap"].forEach((id) => { el(id).value = ""; });
     loadKeys();
   } catch (error) {
-    el("k-result").innerHTML = `<div class="notice err">${esc(error.message)}</div>`;
+    el("k-result").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
   } finally {
     button.disabled = false;
   }
@@ -773,16 +1499,150 @@ async function revokeKey(name) {
   catch (error) { banner(error.message); }
 }
 
+// ---- settings + guide --------------------------------------------------------
+function renderSettings(snapshot) {
+  el("settings").innerHTML = [
+    ["Strategy", snapshot.strategy], ["Accounts", snapshot.pool.total],
+    ["Ready", snapshot.pool.ready], ["Cooling", snapshot.pool.cooling],
+    ["Disabled", snapshot.pool.disabled], ["Queue depth", snapshot.queue.depth],
+    ["Queue max", snapshot.queue.max_size]
+  ].map(([label, value]) =>
+    `<div><span class="lb">${label}</span><span class="vl">${esc(value)}</span></div>`).join("");
+}
+
 async function reloadConfig() {
   try {
     const result = await api("/admin/reload", { method: "POST" });
-    el("reload-result").innerHTML = `<div class="notice ok">Reloaded.
+    el("reload-result").innerHTML = `<div class="note ok"><span>Reloaded.
       ${result.added.length ? "Added " + esc(result.added.join(", ")) + ". " : ""}
-      ${result.removed.length ? "Removed " + esc(result.removed.join(", ")) + "." : ""}</div>`;
+      ${result.removed.length ? "Removed " + esc(result.removed.join(", ")) + "." : ""}</span></div>`;
     refresh();
   } catch (error) {
-    el("reload-result").innerHTML = `<div class="notice err">${esc(error.message)}</div>`;
+    el("reload-result").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
   }
+}
+
+/** The screen that answers "so how do I actually use this thing". */
+function renderGuide() {
+  const origin = location.origin;
+  const exports = `export ANTHROPIC_BASE_URL=${origin}\nexport ANTHROPIC_AUTH_TOKEN=<your key>`;
+  el("guide").innerHTML = `
+    <section>
+      <h2><span class="num">1</span>Point your environment at the gateway</h2>
+      <p>Two variables. Nothing else changes — the gateway speaks the Messages API
+      verbatim and only swaps the auth header.</p>
+      <pre class="code">export ANTHROPIC_BASE_URL=<b>${esc(origin)}</b>
+export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
+      <div class="copyrow">
+        <button class="btn sm" id="g-copy">Copy both lines</button>
+        <span class="dm" style="font-size:11.5px">Mint a key on the Keys screen.</span>
+      </div>
+      <div id="g-copy-msg"></div>
+    </section>
+    <section>
+      <h2><span class="num">2</span>Run Claude Code through it</h2>
+      <p>With those two variables exported, Claude Code needs no configuration at all.</p>
+      <pre class="code">claude</pre>
+      <p>Every turn now goes through the pool. Watch it land on the Overview screen.</p>
+    </section>
+    <section>
+      <h2><span class="num">3</span>Or any Anthropic SDK</h2>
+      <pre class="code">from anthropic import Anthropic
+
+client = Anthropic(base_url="${esc(origin)}", api_key="&lt;your key&gt;")
+client.messages.create(model="claude-sonnet-5", max_tokens=256,
+                       messages=[{"role": "user", "content": "hello"}])</pre>
+    </section>
+    <section>
+      <h2><span class="num">4</span>Check it with curl</h2>
+      <pre class="code">curl ${esc(origin)}/v1/messages \\
+  -H "x-api-key: &lt;your key&gt;" \\
+  -H "content-type: application/json" \\
+  -d '{"model":"claude-sonnet-5","max_tokens":64,
+       "messages":[{"role":"user","content":"hello"}]}'</pre>
+      <p>The response carries an <code>x-tokenbiryani-account</code> header naming the
+      account that served it.</p>
+    </section>`;
+  el("g-copy").addEventListener("click", () => copy(exports, el("g-copy-msg")));
+}
+
+// ---- onboarding --------------------------------------------------------------
+/** No accounts at all: a wizard, not an empty table telling you to edit YAML. */
+function renderOnboarding() {
+  const origin = location.origin;
+  state.onboardStep = 1;
+  el("ob-steps").innerHTML = '<i class="on"></i><i></i><i></i>';
+  el("ob-body").innerHTML = `<div class="stack">
+    <h2>Add your first account</h2>
+    <p class="lede">The gateway has nothing to route to yet. Add a credential and it
+    starts pooling immediately — no config file, no restart.</p>
+    <div class="row" style="justify-content:center">
+      <button class="btn primary" id="ob-add">Add an account</button>
+      <button class="btn ghost" id="ob-skip">I edited the YAML instead</button>
+    </div>
+    <p class="lede" style="font-size:11.5px">Serving at <span class="mono">${esc(origin)}</span></p>
+  </div>`;
+  el("ob-add").addEventListener("click", () => accountModal(null));
+  el("ob-skip").addEventListener("click", refresh);
+}
+
+/** Step 3: the account is in, so hand over the two lines that actually use it. */
+function finishOnboarding(id) {
+  state.onboardStep = 0;
+  const origin = location.origin;
+  const exports = `export ANTHROPIC_BASE_URL=${origin}\nexport ANTHROPIC_AUTH_TOKEN=<your key>`;
+  el("ob-steps").innerHTML = '<i class="done"></i><i class="done"></i><i class="on"></i>';
+  el("ob-body").innerHTML = `<div class="stack">
+    <h2>${esc(id)} is in the pool</h2>
+    <p class="lede">Point a client at the gateway and every request routes through it.</p>
+    <pre class="code">export ANTHROPIC_BASE_URL=<b>${esc(origin)}</b>
+export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b>
+claude</pre>
+    <div class="row" style="justify-content:center">
+      <button class="btn" id="ob-copy">Copy the export lines</button>
+      <button class="btn primary" id="ob-go">Open the console</button>
+    </div>
+    <div id="ob-msg"></div></div>`;
+  el("ob-copy").addEventListener("click", () => copy(exports, el("ob-msg")));
+  el("ob-go").addEventListener("click", refresh);
+}
+
+// ---- data --------------------------------------------------------------------
+async function refresh() {
+  try {
+    const [snapshot, horizon, recent] = await Promise.all([
+      api("/admin/status"), api("/admin/horizon"), api("/admin/requests?limit=100"),
+    ]);
+    state.snapshot = snapshot;
+    // Always seed from history. The live feed only carries *new* events, so a
+    // console that relied on it alone showed an empty list until traffic arrived.
+    state.requests = recent.requests;
+
+    const empty = snapshot.pool.total === 0;
+    el("onboarding").classList.toggle("hidden", !empty);
+    el("app").classList.toggle("hidden", empty);
+    if (empty) {
+      if (!state.onboardStep) renderOnboarding();
+      return;
+    }
+    state.onboardStep = 0;
+
+    renderStats(snapshot);
+    renderAccounts(snapshot);
+    renderAccountsAdmin(snapshot);
+    renderHorizon(horizon);
+    renderSettings(snapshot);
+    paintRequests();
+    tick();
+  } catch (error) {
+    if (error.message !== "unauthorized") banner(error.message);
+  }
+}
+
+async function openRequest(id) {
+  show("requests");
+  try { renderInspector(await api("/admin/requests/" + encodeURIComponent(id))); }
+  catch (error) { banner(error.message); }
 }
 
 // ---- live feed ---------------------------------------------------------------
@@ -827,7 +1687,7 @@ async function connectStream() {
 
 function setLive(on) {
   state.streaming = on;
-  el("live").className = "live " + (on ? "on" : "off");
+  el("live").className = "status " + (on ? "on" : "off");
   el("live-text").textContent = on ? "live" : "polling";
 }
 
@@ -847,11 +1707,17 @@ function activate(nodes, handler) {
 
 function show(name) {
   state.tab = name;
-  document.querySelectorAll("nav button").forEach((b) =>
+  document.querySelectorAll(".nav button").forEach((b) =>
     b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("[data-panel]").forEach((p) =>
     p.classList.toggle("hidden", p.dataset.panel !== name));
+  const [title, sub] = TITLES[name] || [name, ""];
+  el("view-title").textContent = title;
+  el("view-sub").textContent = sub;
   if (name === "keys") loadKeys();
+  if (name === "guide") renderGuide();
+  // Fetched on demand, not on the 5s poll: a 30-day window is a real query.
+  if (name === "usage") loadUsage();
 }
 
 function signIn(key) {
@@ -874,9 +1740,11 @@ function signOut(message) {
   if (state.stopStream) state.stopStream();
   if (state.timer) clearInterval(state.timer);
   if (state.ticker) clearInterval(state.ticker);
+  closeModal();
   el("app").classList.add("hidden");
+  el("onboarding").classList.add("hidden");
   el("gate").classList.remove("hidden");
-  el("gate-msg").innerHTML = message ? `<div class="notice err">${esc(message)}</div>` : "";
+  el("gate-msg").innerHTML = message ? `<div class="note err">${esc(message)}</div>` : "";
 }
 
 function setAttr(name, store, value) {
@@ -884,7 +1752,7 @@ function setAttr(name, store, value) {
   try { localStorage.setItem(store, value); } catch (e) { /* ignore */ }
 }
 
-document.querySelectorAll("nav button").forEach((b) =>
+document.querySelectorAll(".nav button").forEach((b) =>
   b.addEventListener("click", () => show(b.dataset.tab)));
 el("gate-go").addEventListener("click", () => {
   const value = el("gate-key").value.trim();
@@ -898,6 +1766,20 @@ el("density").addEventListener("click", () => setAttr("data-density", DENSITY_ST
   document.documentElement.getAttribute("data-density") === "compact" ? "comfortable" : "compact"));
 el("k-create").addEventListener("click", createKey);
 el("reload").addEventListener("click", reloadConfig);
+el("acct-add").addEventListener("click", () => accountModal(null));
+
+/** One filter row above the charts; every chart re-renders against the same slice. */
+function segmented(id, attribute, apply) {
+  el(id).querySelectorAll("button").forEach((button) =>
+    button.addEventListener("click", () => {
+      el(id).querySelectorAll("button").forEach((b) => b.classList.remove("on"));
+      button.classList.add("on");
+      apply(button.dataset[attribute]);
+      loadUsage();
+    }));
+}
+segmented("u-range", "window", (value) => { state.window = value; });
+segmented("u-group", "group", (value) => { state.groupBy = value; });
 
 (function boot() {
   let stored = "", theme = "dark", density = "comfortable";

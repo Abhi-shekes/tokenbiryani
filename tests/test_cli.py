@@ -71,9 +71,9 @@ def test_missing_cache_rate_renders_as_a_dash():
     assert "—" in render_status(SNAPSHOT, color=False)
 
 
-def test_parser_has_the_four_commands():
+def test_parser_has_every_command():
     parser = build_parser()
-    for command in ("init", "serve", "status", "keygen"):
+    for command in ("init", "serve", "status", "keygen", "strategies", "doctor"):
         assert parser.parse_args([command]).command == command
 
 
@@ -87,3 +87,71 @@ def test_short_keys_are_masked_completely():
     assert masked.endswith("…")
     assert len(masked) < len(long_key)
     assert long_key not in masked
+
+
+# ---- doctor -------------------------------------------------------------------
+# The one check no mock-backed test can make for you: does the real upstream spell
+# the rate-limit headers the way the limit mirror expects?
+
+FULL_HEADERS = {
+    "anthropic-ratelimit-requests-limit": "1000",
+    "anthropic-ratelimit-requests-remaining": "999",
+    "anthropic-ratelimit-requests-reset": "2026-01-01T00:00:00Z",
+    "anthropic-ratelimit-input-tokens-limit": "100000",
+    "anthropic-ratelimit-input-tokens-remaining": "99000",
+    "anthropic-ratelimit-input-tokens-reset": "2026-01-01T00:00:00Z",
+    "anthropic-ratelimit-output-tokens-limit": "20000",
+    "anthropic-ratelimit-output-tokens-remaining": "19000",
+    "anthropic-ratelimit-output-tokens-reset": "2026-01-01T00:00:00Z",
+}
+
+
+def run_doctor(monkeypatch, headers, status_code=200):
+    """Drive cmd_doctor against a scripted response, capturing what it prints."""
+    import httpx
+
+    from tokenbiryani import cli
+
+    def fake_post(url, **kwargs):
+        return httpx.Response(
+            status_code=status_code,
+            headers=headers,
+            json={"type": "message", "content": []},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    args = build_parser().parse_args(
+        ["doctor", "--api-key", "sk-ant-test", "--base-url", "http://upstream"]
+    )
+    return args, cli
+
+
+def test_doctor_passes_when_every_header_is_present(monkeypatch, capsys):
+    args, cli = run_doctor(monkeypatch, FULL_HEADERS)
+    assert cli.cmd_doctor(args) == 0
+    out = capsys.readouterr().out
+    assert "every header the router needs is present" in out
+    # It reports what the router would actually see, not just that keys exist.
+    assert "100k" in out, "the parsed input-token limit"
+
+
+def test_doctor_fails_loudly_when_a_header_is_spelled_differently(monkeypatch, capsys):
+    """The exact silent failure TODO.md warns about: routing degrades, nothing errors."""
+    renamed = dict(FULL_HEADERS)
+    renamed.pop("anthropic-ratelimit-input-tokens-remaining")
+    renamed["anthropic-ratelimit-input-token-remaining"] = "99000"   # note: singular
+
+    args, cli = run_doctor(monkeypatch, renamed)
+    assert cli.cmd_doctor(args) == 1, "a missing header must be a non-zero exit"
+    out = capsys.readouterr().out
+    assert "PROBLEM" in out
+    assert "anthropic-ratelimit-input-tokens-remaining" in out
+    # The header the upstream *did* send is shown, so the mismatch is diagnosable.
+    assert "anthropic-ratelimit-input-token-remaining" in out
+
+
+def test_doctor_reports_an_http_error_instead_of_a_traceback(monkeypatch, capsys):
+    args, cli = run_doctor(monkeypatch, {}, status_code=401)
+    assert cli.cmd_doctor(args) == 1
+    assert "401" in capsys.readouterr().out

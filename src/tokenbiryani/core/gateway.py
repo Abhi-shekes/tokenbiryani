@@ -24,6 +24,12 @@ import httpx
 from ..config import AccountConfig, Config, ConfigError, KeyConfig
 from ..observability.events import Attempt, EventLog, RequestEvent
 from ..observability.metrics import Metrics
+from ..observability.usage import (
+    aggregate,
+    resolve_bucket,
+    resolve_window,
+    sample_from_event,
+)
 from ..providers.anthropic_api import build_upstream
 from ..providers.base import BLOCKED_RESPONSE_HEADERS, Upstream
 from ..proxy import sse
@@ -40,6 +46,7 @@ from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
 from .keys import KeyRegistry, generate_key, record_from_config
 from .limits import LimitMirror, TokenEstimate, estimate_request
+from .oauth import OAuthClient, OAuthError, OAuthTokens, PendingLogin, make_verifier
 from .queue import (
     MAX_WAIT_HEADER,
     PRIORITY_BATCH,
@@ -60,6 +67,9 @@ logger = logging.getLogger("tokenbiryani")
 
 #: Account ids appear in URLs, metric labels and log lines; keep them boring.
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+#: Never leaves the process. Stripped from every account payload the API returns.
+_CREDENTIAL_FIELDS = ("api_key", "oauth_access", "oauth_refresh")
 
 
 class GatewayError(Exception):
@@ -136,12 +146,20 @@ class Gateway:
                     cooldown_seconds=config.breaker.cooldown_seconds,
                 ),
             )
-            self.upstreams[account_config.id] = build_upstream(account_config)
+            self.upstreams[account_config.id] = self._make_upstream(account_config)
 
         #: Accounts declared in the config file. They belong to the file: the API
         #: can neither edit nor delete them, only accounts it created itself.
         self._config_account_ids = {a.id for a in config.accounts}
         self._secrets: Optional[SecretBox] = None
+        self._oauth: Optional[OAuthClient] = None
+        #: Decrypted access tokens, held in memory only. The request path reads
+        #: these synchronously; the refresh task is what keeps them current.
+        self._oauth_tokens: Dict[str, str] = {}
+        #: Session facts the console shows — expiry, whether it can be renewed.
+        #: Kept beside the token so a snapshot needs no store round-trip.
+        self._oauth_meta: Dict[str, Dict[str, Any]] = {}
+        self._logins: Dict[str, PendingLogin] = {}
 
         self._client = client
         self._owns_client = client is None
@@ -198,6 +216,13 @@ class Gateway:
     def is_config_account(self, account_id: str) -> bool:
         return account_id in self._config_account_ids
 
+    def _make_upstream(self, account_config: AccountConfig) -> Upstream:
+        """One construction point, so an oauth account always gets its token source."""
+        if account_config.type == "oauth":
+            account_id = account_config.id
+            return build_upstream(account_config, lambda: self.oauth_token(account_id))
+        return build_upstream(account_config)
+
     def _config_from_record(self, record: Dict[str, Any]) -> AccountConfig:
         return AccountConfig(
             id=str(record["id"]),
@@ -217,6 +242,23 @@ class Gateway:
             assumed_headroom=float(record.get("assumed_headroom") or 0.5),
         )
 
+    def _cache_session(self, record: Dict[str, Any]) -> None:
+        """Decrypt a stored subscription session into the in-memory token cache."""
+        if record.get("type") != "oauth":
+            return
+        account_id = str(record.get("id") or "")
+        self._oauth_meta[account_id] = {
+            "session_expires_at": record.get("oauth_expires_at"),
+            "can_refresh": bool(record.get("oauth_refresh")),
+        }
+        try:
+            self._oauth_tokens[account_id] = self.secrets.decrypt(
+                str(record.get("oauth_access") or "")
+            )
+        except SecretError as exc:
+            logger.warning("cannot read the session for %r: %s", account_id, exc)
+            self._oauth_tokens.pop(account_id, None)
+
     async def refresh_accounts(self) -> None:
         """Merge accounts stored through the API into the running pool.
 
@@ -235,6 +277,8 @@ class Gateway:
             except SecretError as exc:
                 logger.warning("account %r is unreadable: %s", account_id, exc)
                 continue
+            # Decrypt the session now, not on the request path.
+            self._cache_session(record)
             existing = self.accounts.get(account_id)
             if existing is None:
                 self.accounts[account_id] = AccountRuntime(
@@ -245,7 +289,7 @@ class Gateway:
                         cooldown_seconds=self.config.breaker.cooldown_seconds,
                     ),
                 )
-                self.upstreams[account_id] = build_upstream(account_config)
+                self.upstreams[account_id] = self._make_upstream(account_config)
                 continue
             rotated = (
                 existing.config.api_key != account_config.api_key
@@ -255,7 +299,7 @@ class Gateway:
             existing.config = account_config
             existing.mirror.observable = account_config.observable_limits
             if rotated:
-                self.upstreams[account_id] = build_upstream(account_config)
+                self.upstreams[account_id] = self._make_upstream(account_config)
                 existing.disabled_reason = None
                 existing.breaker.record_success()
 
@@ -334,6 +378,16 @@ class Gateway:
 
         await self.store.put_account(record)
         await self.refresh_accounts()
+
+        # Re-enabling is an operator saying "I fixed it". A disabled_reason from the
+        # last 401, or a breaker still open from the failures that followed, would
+        # otherwise keep the account out of the pool with the toggle reading "on".
+        if changes.get("enabled") is True:
+            runtime = self.accounts.get(account_id)
+            if runtime is not None:
+                runtime.disabled_reason = None
+                runtime.breaker.record_success()
+
         return self.redacted_account(record)
 
     async def delete_account(self, account_id: str) -> bool:
@@ -378,10 +432,171 @@ class Gateway:
                 "detail": classification.detail or classification.kind}
 
     def redacted_account(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        out = {k: v for k, v in record.items() if k != "api_key"}
+        # Every field holding a credential is stripped by name. A subscription's
+        # refresh token is a longer-lived secret than the access token it mints, so
+        # forgetting it here would be the worse of the two leaks.
+        out = {k: v for k, v in record.items() if k not in _CREDENTIAL_FIELDS}
         out["source"] = "managed"
-        out["has_credential"] = bool(record.get("api_key"))
+        out["has_credential"] = bool(record.get("api_key") or record.get("oauth_access"))
+        if record.get("type") == "oauth":
+            out["session_expires_at"] = record.get("oauth_expires_at")
+            out["can_refresh"] = bool(record.get("oauth_refresh"))
         return out
+
+    # ---- subscription sessions ----------------------------------------------
+
+    @property
+    def oauth(self) -> OAuthClient:
+        if self._oauth is None:
+            settings = self.config.oauth
+            self._oauth = OAuthClient(
+                client_id=settings.client_id,
+                authorize_url=settings.authorize_url,
+                token_url=settings.token_url,
+                redirect_uri=settings.redirect_uri,
+                scopes=settings.scopes,
+                client=self.client,
+            )
+        return self._oauth
+
+    def oauth_token(self, account_id: str) -> str:
+        """The current access token for a subscription account.
+
+        Synchronous on purpose: it is called from `auth_headers` on the request
+        path. Refreshing happens in the background task, never here — a request
+        must not block on a token endpoint.
+        """
+        token = self._oauth_tokens.get(account_id)
+        if not token:
+            raise GatewayError(
+                401,
+                f"account {account_id!r} has no active session. Log in again from the "
+                "Accounts screen.",
+                kind="authentication_error",
+            )
+        return token
+
+    async def oauth_start(self, account_id: str, name: str = "") -> Dict[str, Any]:
+        """Begin a login. Returns the URL to open and the handle to complete with."""
+        self.oauth.require_configured()
+        account_id = (account_id or "").strip()
+        if not _SAFE_ID.match(account_id):
+            raise GatewayError(
+                400,
+                "an account id may contain letters, digits, dashes and underscores only",
+                kind="invalid_request_error",
+            )
+        await self.refresh_accounts()
+        if account_id in self.accounts:
+            raise GatewayError(
+                409, f"an account named {account_id!r} already exists",
+                kind="invalid_request_error",
+            )
+        login = PendingLogin(
+            state=uuid.uuid4().hex, verifier=make_verifier(),
+            account_id=account_id, name=name or account_id,
+        )
+        now = time.time()
+        # Drop anything abandoned, so a browser closed mid-login cannot accumulate.
+        self._logins = {k: v for k, v in self._logins.items() if not v.expired(now)}
+        self._logins[login.state] = login
+        return {
+            "state": login.state,
+            "authorize_url": self.oauth.authorize_url_for(login),
+            "manual": not self.config.oauth.redirect_uri,
+        }
+
+    async def oauth_complete(self, state: str, code: str) -> Dict[str, Any]:
+        """Finish a login: exchange the code and store the session as an account."""
+        login = self._logins.pop(state, None)
+        if login is None:
+            raise GatewayError(
+                400,
+                "that login is not in progress — it may have expired, or already been "
+                "completed. Start again from the Accounts screen.",
+                kind="invalid_request_error",
+            )
+        if login.expired(time.time()):
+            raise GatewayError(400, "that login expired; start again",
+                               kind="invalid_request_error")
+        code = (code or "").strip()
+        if not code:
+            raise GatewayError(400, "no authorization code was supplied",
+                               kind="invalid_request_error")
+        try:
+            tokens = await self.oauth.exchange(code, login.verifier)
+        except OAuthError as exc:
+            raise GatewayError(400, str(exc), kind="invalid_request_error") from exc
+
+        record = self.account_record(
+            login.account_id, login.name, "",
+            type="oauth",
+            # Nothing to reserve against and nothing to read: a subscription session
+            # sends no rate-limit headers.
+            observable_limits=False,
+        )
+        self._store_session(record, tokens)
+        await self.store.put_account(record)
+        await self.refresh_accounts()
+        return self.redacted_account(record)
+
+    def _store_session(self, record: Dict[str, Any], tokens: OAuthTokens) -> None:
+        record["oauth_access"] = self.secrets.encrypt(tokens.access_token)
+        record["oauth_refresh"] = self.secrets.encrypt(tokens.refresh_token)
+        record["oauth_expires_at"] = tokens.expires_at
+        record["oauth_scope"] = tokens.scope
+
+    async def refresh_oauth_sessions(self) -> None:
+        """Renew subscription tokens before they expire.
+
+        `contrib/tokenbiryani-oauth` deliberately does not do this — it re-reads the
+        file the Claude CLI refreshes. A gateway holding several sessions has no CLI
+        to lean on, so it has to renew them itself.
+        """
+        settings = self.config.oauth
+        now = time.time()
+        for record in await self.store.list_accounts():
+            if record.get("type") != "oauth":
+                continue
+            account_id = str(record.get("id") or "")
+            expires_at = record.get("oauth_expires_at")
+            if not isinstance(expires_at, (int, float)):
+                # Unknown expiry: nothing to renew against. The token is used until
+                # the upstream rejects it, which the error taxonomy already handles.
+                continue
+            if float(expires_at) - settings.refresh_skew_seconds > now:
+                continue
+            try:
+                refresh_token = self.secrets.decrypt(str(record.get("oauth_refresh") or ""))
+                tokens = await self.oauth.refresh(refresh_token)
+            except (OAuthError, SecretError) as exc:
+                # Disable rather than retry forever: an expired session that cannot
+                # be renewed needs a human, and silently failing every request while
+                # reading "ready" is the outcome worth avoiding.
+                logger.warning("could not refresh session for %r: %s", account_id, exc)
+                runtime = self.accounts.get(account_id)
+                if runtime is not None:
+                    runtime.disabled_reason = "session expired — log in again"
+                continue
+            # Some providers do not reissue a refresh token; keep the one we have.
+            if not tokens.refresh_token:
+                tokens.refresh_token = refresh_token
+            self._store_session(record, tokens)
+            await self.store.put_account(record)
+            self._cache_session(record)
+            runtime = self.accounts.get(account_id)
+            if runtime is not None:
+                runtime.disabled_reason = None
+            logger.info("renewed subscription session for %r", account_id)
+
+    async def watch_oauth_sessions(self) -> None:
+        interval = max(5.0, self.config.oauth.refresh_interval_seconds)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.refresh_oauth_sessions()
+            except Exception as exc:  # noqa: BLE001 - a blip must not kill routing
+                logger.warning("session refresh pass failed: %s", exc)
 
     async def create_key(self, name: str, **options: Any) -> Tuple[str, Dict[str, Any]]:
         """Mint a managed key. The plaintext is returned once and never stored."""
@@ -454,7 +669,7 @@ class Gateway:
                         cooldown_seconds=config.breaker.cooldown_seconds,
                     ),
                 )
-                self.upstreams[account_config.id] = build_upstream(account_config)
+                self.upstreams[account_config.id] = self._make_upstream(account_config)
                 continue
             credentials_changed = (
                 existing.config.api_key != account_config.api_key
@@ -467,7 +682,7 @@ class Gateway:
             existing.breaker.failure_threshold = config.breaker.failure_threshold
             existing.breaker.cooldown_seconds = config.breaker.cooldown_seconds
             if credentials_changed:
-                self.upstreams[account_config.id] = build_upstream(account_config)
+                self.upstreams[account_config.id] = self._make_upstream(account_config)
                 # New credentials deserve a fresh chance: a rotated key is the usual
                 # reason an account was disabled in the first place.
                 existing.disabled_reason = None
@@ -617,7 +832,7 @@ class Gateway:
                 kind=classification.kind,
             )
             if not self._may_retry(plan, account, classification):
-                self._fail(plan, last_error)
+                await self._fail(plan, last_error)
                 raise last_error
             await self._backoff(plan)
 
@@ -764,7 +979,7 @@ class Gateway:
                     admission.reason or "no eligible account",
                     kind="overloaded_error",
                 )
-                self._fail(plan, error)
+                await self._fail(plan, error)
                 raise error
 
             if self._may_spill(plan):
@@ -779,7 +994,7 @@ class Gateway:
                     kind="rate_limit_error",
                     retry_after=decision.soonest_available,
                 )
-                self._fail(plan, error)
+                await self._fail(plan, error)
                 raise error
 
             budget = min(
@@ -802,7 +1017,7 @@ class Gateway:
                     kind="rate_limit_error",
                     retry_after=decision.soonest_available,
                 )
-                self._fail(plan, error)
+                await self._fail(plan, error)
                 raise error from exc
             finally:
                 plan.queued_seconds += time.time() - waited_from
@@ -867,7 +1082,7 @@ class Gateway:
                     {"x-tokenbiryani-batch-id": exc.batch_id} if exc.batch_id else None
                 ),
             )
-            self._fail(plan, error)
+            await self._fail(plan, error)
             raise error from exc
         except (batch_lane.BatchUnavailable, httpx.HTTPError) as exc:
             # The spill lane is an optimisation, never a dependency: fall back to
@@ -938,7 +1153,7 @@ class Gateway:
             classification.detail or classification.kind,
             kind=classification.kind,
         )
-        self._fail(plan, error)
+        await self._fail(plan, error)
         raise error
 
     async def _dispatch(
@@ -1082,7 +1297,7 @@ class Gateway:
                 or not self._may_retry(plan, account, classification)
             ):
                 message = classification.detail or classification.kind
-                self._fail(plan, GatewayError(status or 502, message, classification.kind))
+                await self._fail(plan, GatewayError(status or 502, message, classification.kind))
                 yield sse.error_event(message, classification.kind)
                 return
 
@@ -1156,6 +1371,7 @@ class Gateway:
         event.affinity_broken = decision.affinity_broken
         event.affinity_honored = decision.affinity_honored
         self.events.record(event)
+        await self._record_usage(event)
 
         self.metrics.incr("tokenbiryani_responses_total", account=account.id, status=str(status))
         self.metrics.incr(
@@ -1173,11 +1389,26 @@ class Gateway:
         if len(event.attempts) > 1:
             self.metrics.incr("tokenbiryani_failovers_total", model=plan.model)
 
-    def _fail(self, plan: _Plan, error: GatewayError) -> None:
+    async def _record_usage(self, event: RequestEvent) -> None:
+        """Persist one request's accounting so the charts survive a restart.
+
+        Never allowed to fail a request. The spend ledger is the billing record and
+        is written separately; this is the history a chart is drawn from, and a
+        dropped row costs one notch on a graph.
+        """
+        try:
+            await self.store.record_usage(sample_from_event(event))
+        except Exception:  # noqa: BLE001 - telemetry must not break the response
+            logger.warning("could not record usage for %s", event.request_id, exc_info=True)
+
+    async def _fail(self, plan: _Plan, error: GatewayError) -> None:
         plan.event.status = error.status
         plan.event.error = error.kind
         plan.event.latency = round(time.time() - plan.started, 4)
         self.events.record(plan.event)
+        # Failures are history too. A usage chart that shows only successes hides
+        # the outage, which is exactly what someone opens it to find.
+        await self._record_usage(plan.event)
         self.metrics.incr("tokenbiryani_gateway_errors_total", kind=error.kind)
 
     async def simple_request(
@@ -1297,14 +1528,72 @@ class Gateway:
             series.append({"offset_seconds": round(index * step), "input_tokens": total})
         return {"minutes": minutes, "series": series}
 
+    def _identify(self, runtime: AccountRuntime, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Stamp the fields the console needs to *manage* an account, not just watch it.
+
+        `AccountRuntime.snapshot` is the live picture — states, meters, counters. None
+        of it says what the account is called, whether it is editable, or what it was
+        configured with, and a UI that offers a Rename button needs all three.
+        """
+        config = runtime.config
+        entry["name"] = getattr(config, "name", None) or runtime.id
+        entry["source"] = "config" if self.is_config_account(runtime.id) else "managed"
+        entry["enabled"] = bool(getattr(config, "enabled", True))
+        entry["base_url"] = getattr(config, "base_url", "") or ""
+        entry["models"] = list(getattr(config, "models", ["*"]))
+        entry["max_concurrency"] = getattr(config, "max_concurrency", None)
+        entry["spend_cap_usd"] = getattr(config, "spend_cap_usd", None)
+        entry["observable_limits"] = bool(getattr(config, "observable_limits", True))
+        if config.type == "oauth":
+            entry.update(self._oauth_meta.get(runtime.id, {
+                "session_expires_at": None, "can_refresh": False,
+            }))
+        return entry
+
+    def account_detail(self, account_id: str) -> Optional[Dict[str, Any]]:
+        """One account, live picture plus the config the console can edit."""
+        runtime = self.accounts.get(account_id)
+        if runtime is None:
+            return None
+        payload = self._identify(runtime, runtime.snapshot(time.time()))
+        payload["recent_requests"] = self.events.recent_for(account_id, 25)
+        return payload
+
+    async def usage(
+        self,
+        window: Optional[str] = None,
+        bucket: Optional[str] = None,
+        group_by: str = "account",
+        account_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Bucketed usage history for the console's charts.
+
+        Unlike `snapshot`, this reads the store rather than memory, so it answers
+        for time the process was not running.
+        """
+        window_seconds = resolve_window(window)
+        bucket_seconds = resolve_bucket(window_seconds, bucket)
+        now = time.time()
+        # Ask for the whole bucket grid the aggregator will emit, not just the
+        # trailing window, or the oldest bucket comes back half empty.
+        end = (int(now) // bucket_seconds) * bucket_seconds + bucket_seconds
+        count = max(1, window_seconds // bucket_seconds)
+        rows = await self.store.usage_rows(end - count * bucket_seconds, end, account_id)
+        result = aggregate(rows, now, window_seconds, bucket_seconds, group_by)
+        result["account_id"] = account_id
+        # Names, so a chart legend can read "Work account" rather than "acct-02".
+        result["names"] = {
+            runtime.id: getattr(runtime.config, "name", None) or runtime.id
+            for runtime in self.accounts.values()
+        }
+        return result
+
     def snapshot(self) -> Dict[str, Any]:
         now = time.time()
-        accounts = []
-        for runtime in self.accounts.values():
-            entry = runtime.snapshot(now)
-            entry["source"] = "config" if self.is_config_account(runtime.id) else "managed"
-            entry["name"] = getattr(runtime.config, "name", None) or runtime.id
-            accounts.append(entry)
+        accounts = [
+            self._identify(runtime, runtime.snapshot(now))
+            for runtime in self.accounts.values()
+        ]
         ready = [
             a
             for a in self.accounts.values()

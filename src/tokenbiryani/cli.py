@@ -1,7 +1,11 @@
-"""Command line: init, serve, status, keygen.
+"""Command line: init, serve, status, strategies, keygen, doctor.
 
 `status` ships at M1, long before the web console — the audience already lives in a
 terminal, and building it first forces the event model into shape.
+
+`doctor` is the odd one out: it is the only command that deliberately spends money,
+because it is the only way to check the one assumption no mock can check for us —
+that the real API spells its rate-limit headers the way the limit mirror expects.
 """
 
 from __future__ import annotations
@@ -161,6 +165,9 @@ accounts:
   # - id: acct-02
   #   type: anthropic_api
   #   api_key: ${{ANTHROPIC_API_KEY_2}}
+  #
+  # Or add accounts from the console — no editing this file. Anything added there is
+  # stored by the gateway, encrypted, and can be renamed, tested and rotated in place.
 
 keys:
   - key: {key}
@@ -289,6 +296,152 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+#: Every header the limit mirror reads. If a real response spells one of these
+#: differently, that window stays empty, the account reads as full, and the router
+#: silently degrades to round-robin — shredding the prompt cache while looking healthy.
+EXPECTED_HEADERS = [
+    "anthropic-ratelimit-{}-limit",
+    "anthropic-ratelimit-{}-remaining",
+    "anthropic-ratelimit-{}-reset",
+]
+LIMIT_WINDOWS = ["requests", "input-tokens", "output-tokens"]
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Send one real request upstream and report what it actually said.
+
+    Everything in this project is tested against a mock that encodes assumptions
+    about header spellings. This is the command that checks those assumptions
+    against the real thing, which no test can do.
+    """
+    import time
+
+    import httpx
+
+    from .core.limits import LimitMirror
+
+    color = _colors_enabled()
+    api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY")
+    base_url = args.base_url
+
+    if not api_key:
+        # Fall back to the first API-key account in the config.
+        try:
+            from .config import Config
+
+            config = Config.load(args.config)
+        except Exception:
+            config = None
+        if config is not None:
+            for account in config.accounts:
+                if account.type == "anthropic_api" and account.api_key:
+                    api_key = account.api_key
+                    base_url = base_url or account.base_url
+                    print("using account {} from {}".format(
+                        paint(account.id, "brand", color), args.config))
+                    break
+
+    if not api_key:
+        print(
+            "doctor needs a real credential. Pass --api-key, set ANTHROPIC_API_KEY, or "
+            "point --config at a file with an anthropic_api account.",
+            file=sys.stderr,
+        )
+        return 1
+
+    base_url = (base_url or "https://api.anthropic.com").rstrip("/")
+    payload = {
+        "model": args.model,
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+
+    print()
+    print("  {} {}".format(paint("POST", "dim", color), base_url + "/v1/messages"))
+    print("  {} {}".format(paint("model", "dim", color), args.model))
+    print("  {}".format(paint("one request, max_tokens=1 — a few cents at most", "dim", color)))
+    print()
+
+    try:
+        response = httpx.post(
+            base_url + "/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=30.0,
+        )
+    except httpx.HTTPError as exc:
+        print("  {} could not reach {}: {}".format(
+            paint("FAIL", "disabled", color), base_url, exc), file=sys.stderr)
+        return 1
+
+    status_color = "ready" if response.status_code < 300 else "disabled"
+    print("  {}  HTTP {}".format(
+        paint("status", "dim", color), paint(str(response.status_code), status_color, color)))
+    if response.status_code >= 300:
+        print(f"  {response.text[:400]}")
+        print()
+        return 1
+
+    lowered = {k.lower(): v for k, v in response.headers.items()}
+    anthropic_headers = sorted(k for k in lowered if k.startswith("anthropic-"))
+
+    print()
+    print(paint("  headers the upstream actually returned", "dim", color))
+    if not anthropic_headers:
+        print("    {}".format(paint("none at all", "disabled", color)))
+    for name in anthropic_headers:
+        print(f"    {name:<44} {lowered[name]}")
+
+    print()
+    print(paint("  headers the limit mirror looks for", "dim", color))
+    missing = []
+    for window in LIMIT_WINDOWS:
+        for template in EXPECTED_HEADERS:
+            name = template.format(window)
+            present = name in lowered
+            if not present:
+                missing.append(name)
+            print("    {} {:<44} {}".format(
+                paint("✓" if present else "✗", "ready" if present else "disabled", color),
+                name,
+                lowered.get(name, paint("missing", "disabled", color)),
+            ))
+
+    # The real proof: feed the response through the mirror the router reads.
+    mirror = LimitMirror()
+    mirror.update_from_headers(dict(response.headers), time.time())
+    snapshot = mirror.snapshot(time.time())
+
+    print()
+    print(paint("  what the router would see", "dim", color))
+    for label in ("requests", "input_tokens", "output_tokens"):
+        parsed = snapshot[label]
+        print("    {:<16} limit {:<10} remaining {:<10} resets {}".format(
+            label,
+            _fmt_tokens(parsed["limit"]),
+            _fmt_tokens(parsed["remaining"]),
+            _fmt_clock(parsed["reset_in"]),
+        ))
+
+    print()
+    if missing:
+        print("  {} {} of {} headers are missing or spelled differently.".format(
+            paint("PROBLEM", "disabled", color), len(missing), len(LIMIT_WINDOWS) * 3))
+        print("  Those windows stay empty, so those accounts read as full and routing")
+        print("  degrades to round-robin. Please open an issue with the header list above.")
+        print()
+        return 1
+
+    print("  {} every header the router needs is present and parsed.".format(
+        paint("OK", "ready", color)))
+    print()
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     import httpx
 
@@ -351,6 +504,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     strategies = sub.add_parser("strategies", help="list routing strategies")
     strategies.set_defaults(func=cmd_strategies)
+
+    doctor = sub.add_parser(
+        "doctor",
+        help="send one real request upstream and check the rate-limit headers",
+    )
+    doctor.add_argument("--api-key", help="defaults to $ANTHROPIC_API_KEY, then the config")
+    doctor.add_argument("--base-url", help="defaults to https://api.anthropic.com")
+    doctor.add_argument("--model", default="claude-sonnet-5")
+    doctor.set_defaults(func=cmd_doctor)
 
     keygen = sub.add_parser("keygen", help="print a new virtual key")
     keygen.set_defaults(func=cmd_keygen)

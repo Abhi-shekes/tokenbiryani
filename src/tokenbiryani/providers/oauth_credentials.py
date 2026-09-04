@@ -1,14 +1,17 @@
-"""Where a subscription token comes from.
+"""Where a subscription token comes from, when the gateway is not holding one.
 
-The default source is the credentials file the Claude Code CLI already maintains.
-That choice is deliberate: this package does **not** implement an OAuth refresh flow.
-The CLI refreshes that file on its own, and reading it means the gateway inherits a
-fresh token for free rather than this package guessing at a token endpoint and client
-id it cannot verify.
+An `oauth` account normally uses a session the gateway obtained itself and refreshes
+(see `core/oauth.py`). These sources are the other case: a token that already exists
+somewhere, which the gateway reads rather than owns.
 
-The consequence is worth stating plainly: if the file's token expires and nothing
-refreshes it, the account is disabled with a message telling the operator to run the
-CLI once. That is an honest failure, and much better than a silent one.
+The default is the credentials file the Claude Code CLI maintains. Reading it means
+the gateway inherits a fresh token for free — the CLI does the refreshing. If that
+token expires and nothing renews it, the account is disabled with a message telling
+the operator to run the CLI once. An honest failure, and much better than a silent one.
+
+These sources came from `contrib/tokenbiryani-oauth`, which is where `type: oauth`
+started. They live in core now so that every configuration that package supported
+keeps working unchanged.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 #: Default location of the CLI's credentials file on Linux and macOS.
 DEFAULT_PATH = os.path.join("~", ".claude", ".credentials.json")
@@ -178,7 +181,7 @@ def redact(token: str) -> str:
 
 def key_shape(data: Any, prefix: str = "", depth: int = 0) -> Sequence[str]:
     """The dotted keys a credentials file contains, values omitted."""
-    out = []
+    out: List[str] = []
     if isinstance(data, dict) and depth < 4:
         for name, value in data.items():
             path = f"{prefix}.{name}" if prefix else name

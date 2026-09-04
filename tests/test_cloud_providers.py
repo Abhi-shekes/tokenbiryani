@@ -246,7 +246,7 @@ def test_build_upstream_dispatches_on_type():
         build_upstream(AccountConfig(id="v", type="vertex", options={"project": "p"})),
         VertexUpstream,
     )
-    with pytest.raises(ValueError, match="known: anthropic_api, bedrock, vertex"):
+    with pytest.raises(ValueError, match="known: anthropic_api, bedrock, oauth, vertex"):
         build_upstream(AccountConfig(id="x", type="azure"))
 
 

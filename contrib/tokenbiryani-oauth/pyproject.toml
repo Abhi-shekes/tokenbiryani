@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tokenbiryani-oauth"
 version = "0.1.0"
-description = "Subscription-session account type for the tokenbiryani gateway. Read the README before installing."
+description = "Deprecated: `type: oauth` is built into tokenbiryani >= 0.1.0. Kept as a compatibility shim."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.8"
@@ -14,9 +14,9 @@ dependencies = ["tokenbiryani>=0.1.0", "httpx>=0.24"]
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "pytest-asyncio>=0.21", "ruff>=0.1"]
 
-# This is the whole integration: installing the package makes `type: oauth` valid.
-[project.entry-points."tokenbiryani.providers"]
-oauth = "tokenbiryani_oauth:OAuthUpstream"
+# No entry point any more. `oauth` became a built-in account type in core, and a
+# plugin may not shadow a built-in — registering it would raise on every startup.
+# Existing `type: oauth` config keeps working; core reads the same options.
 
 [project.scripts]
 tokenbiryani-oauth-check = "tokenbiryani_oauth.check:main"

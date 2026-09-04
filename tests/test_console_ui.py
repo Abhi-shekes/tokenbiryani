@@ -105,7 +105,7 @@ def test_the_request_list_populates_from_history(page):
 
 
 def test_the_inspector_opens_and_shows_the_decision(page):
-    page.click("nav button[data-tab='requests']")
+    page.click(".nav button[data-tab='requests']")
     page.wait_for_selector("#requests [data-request]")
     page.query_selector_all("#requests [data-request]")[0].click()
     page.wait_for_selector("#inspector .card", timeout=10000)
@@ -115,7 +115,7 @@ def test_the_inspector_opens_and_shows_the_decision(page):
 
 
 def test_a_request_row_is_reachable_by_keyboard(page):
-    page.click("nav button[data-tab='requests']")
+    page.click(".nav button[data-tab='requests']")
     page.wait_for_selector("#requests [data-request]")
     row = page.query_selector_all("#requests [data-request]")[0]
     assert row.get_attribute("tabindex") == "0"
@@ -125,7 +125,7 @@ def test_a_request_row_is_reachable_by_keyboard(page):
 
 
 def test_countdowns_tick(page):
-    page.click("nav button[data-tab='pool']")
+    page.click(".nav button[data-tab='pool']")
     page.wait_for_selector(".cd")
     first = page.inner_text(".cd")
     page.wait_for_timeout(2300)
@@ -133,15 +133,15 @@ def test_countdowns_tick(page):
 
 
 def test_the_pool_renders_its_parts(page):
-    page.click("nav button[data-tab='pool']")
+    page.click(".nav button[data-tab='pool']")
     page.wait_for_selector("#accounts-wrap tr[data-account]")
-    assert len(page.query_selector_all("#stats .stat")) == 6
+    assert len(page.query_selector_all("#stats .tile")) == 6
     assert page.query_selector_all("#hz div"), "capacity horizon drew no bars"
     assert page.query_selector("#accounts-wrap .spark"), "no latency sparkline"
 
 
 def test_account_detail_opens_from_the_pool(page):
-    page.click("nav button[data-tab='pool']")
+    page.click(".nav button[data-tab='pool']")
     page.wait_for_selector("#accounts-wrap tr[data-account]")
     page.query_selector("#accounts-wrap tr[data-account]").click()
     page.wait_for_selector("#account-detail .card", timeout=10000)
@@ -149,7 +149,7 @@ def test_account_detail_opens_from_the_pool(page):
 
 
 def test_theme_and_density_toggle_and_persist(page):
-    page.click("nav button[data-tab='pool']")
+    page.click(".nav button[data-tab='pool']")
     page.click("#theme")
     assert page.get_attribute("html", "data-theme") == "light"
     page.click("#density")
@@ -164,11 +164,11 @@ def test_theme_and_density_toggle_and_persist(page):
 
 
 def test_keys_can_be_minted_and_revoked_from_the_ui(page):
-    page.click("nav button[data-tab='keys']")
+    page.click(".nav button[data-tab='keys']")
     page.wait_for_selector("#keys tbody tr")
     page.fill("#k-name", "ui-minted")
     page.click("#k-create")
-    page.wait_for_selector("#k-result .notice.ok", timeout=10000)
+    page.wait_for_selector("#k-result .note.ok", timeout=10000)
     assert "bir_" in page.inner_text("#k-result")
     page.wait_for_selector("[data-revoke='ui-minted']", timeout=10000)
     page.on("dialog", lambda d: d.accept())
@@ -178,7 +178,151 @@ def test_keys_can_be_minted_and_revoked_from_the_ui(page):
 
 
 def test_no_javascript_errors_anywhere(page):
-    for tab in ("pool", "requests", "accounts", "keys", "settings"):
-        page.click(f"nav button[data-tab='{tab}']")
+    for tab in ("pool", "usage", "requests", "accounts", "keys", "guide", "settings"):
+        page.click(f".nav button[data-tab='{tab}']")
         page.wait_for_timeout(250)
     assert page.errors == [], page.errors
+
+
+def test_an_account_can_be_added_named_and_deleted_from_the_ui(page):
+    """The gap this phase closes: the managed-account API had no UI at all."""
+    page.click(".nav button[data-tab='accounts']")
+    page.wait_for_selector("#accounts-table tr[data-row]")
+
+    page.click("#acct-add")
+    page.wait_for_selector(".modal")
+    page.fill("#m-name", "Spare capacity")
+    page.fill("#m-id", "acct-ui")
+    page.fill("#m-fields [data-field='api_key']", "key-from-the-ui")
+    page.click("#m-save")
+
+    page.wait_for_selector("tr[data-row='acct-ui']", timeout=10000)
+    row = page.inner_text("tr[data-row='acct-ui']")
+    assert "Spare capacity" in row, "the name it was given must be what the table shows"
+    assert "managed" in row.lower(), "and it must read as editable, not config-owned"
+
+    # Renaming goes through PATCH and survives the next poll.
+    page.click("[data-edit='acct-ui']")
+    page.wait_for_selector(".modal")
+    page.fill("#m-name", "Renamed in place")
+    page.click("#m-save")
+    page.wait_for_function(
+        "document.querySelector(\"tr[data-row='acct-ui']\")"
+        "?.innerText.includes('Renamed in place')",
+        timeout=10000,
+    )
+
+    page.on("dialog", lambda d: d.accept())
+    page.click("[data-del='acct-ui']")
+    page.wait_for_function(
+        "!document.querySelector(\"tr[data-row='acct-ui']\")", timeout=10000
+    )
+
+
+def test_a_credential_can_be_tested_from_the_ui(page):
+    """'Did it actually connect' has to be answerable without reading a log."""
+    page.click(".nav button[data-tab='accounts']")
+    page.wait_for_selector("#accounts-table tr[data-row]")
+    page.click("[data-test='acct-01']")
+    # Not wait_for_selector: an earlier test may have left a message in this slot.
+    page.wait_for_function(
+        "document.querySelector('#acct-msg .note')?.innerText.includes('acct-01')",
+        timeout=15000,
+    )
+
+
+def test_config_accounts_are_locked_against_editing(page):
+    """The file is the operator's. The UI must not offer to overwrite it."""
+    page.click(".nav button[data-tab='accounts']")
+    page.wait_for_selector("#accounts-table tr[data-row='acct-01']")
+    row = page.query_selector("tr[data-row='acct-01']")
+    assert row.query_selector("[data-del]") is None, "config accounts get no Delete"
+    assert row.query_selector("[data-edit]") is None, "config accounts get no Edit"
+    assert row.query_selector("[data-test]"), "but testing one is always allowed"
+
+
+def test_the_usage_screen_draws_its_charts(page):
+    page.click(".nav button[data-tab='usage']")
+    page.wait_for_selector("#u-tokens svg", timeout=15000)
+    assert page.query_selector_all("#u-tokens .seg"), "no stacked segments"
+    assert page.query_selector("#u-cost svg"), "no cost chart"
+    assert page.query_selector("#u-cache svg"), "no cache-rate chart"
+    # Every value the charts encode as colour is also readable as a number.
+    assert page.query_selector("#u-table table"), "the table view is the contrast relief"
+    assert page.query_selector("#u-tokens .legend"), "two or more series need a legend"
+
+
+def test_changing_the_range_refetches_every_chart(page):
+    page.click(".nav button[data-tab='usage']")
+    page.wait_for_selector("#u-tokens svg", timeout=15000)
+    before = page.inner_text("#u-note")
+    page.click("[data-window='7d']")
+    page.wait_for_function(
+        f"document.querySelector('#u-note').innerText !== {before!r}", timeout=15000
+    )
+    assert page.query_selector_all("#u-tokens .seg"), "charts must survive a range change"
+    page.click("[data-window='24h']")
+    page.wait_for_timeout(600)
+
+
+def test_series_colour_follows_the_entity_not_its_rank(page):
+    """A reader who learned 'acct-01 is blue' must not be lied to by a re-sort."""
+    page.click(".nav button[data-tab='usage']")
+    page.wait_for_selector("#u-tokens svg", timeout=15000)
+    slots = page.evaluate("JSON.stringify(state.slots)")
+    page.click("[data-window='7d']")
+    page.wait_for_timeout(900)
+    page.click("[data-group='model']")
+    page.wait_for_timeout(900)
+    page.click("[data-group='account']")
+    page.wait_for_timeout(900)
+    after = page.evaluate("JSON.stringify(state.slots)")
+    import json
+    for name, slot in json.loads(slots).items():
+        assert json.loads(after)[name] == slot, f"{name} was repainted"
+    page.click("[data-window='24h']")
+    page.wait_for_timeout(600)
+
+
+def test_a_chart_hover_shows_the_bucket(page):
+    page.click(".nav button[data-tab='usage']")
+    page.wait_for_selector("#u-tokens [data-bucket]", timeout=15000)
+    page.hover("#u-tokens [data-bucket='5']")
+    page.wait_for_selector("#u-tokens .tip:not(.hidden)", timeout=5000)
+    assert page.inner_text("#u-tokens .tip").strip()
+
+
+def test_the_subscription_type_offers_a_login_not_a_credential_field(page):
+    """A subscription is signed into, so the modal must not ask for a key."""
+    page.click(".nav button[data-tab='accounts']")
+    page.wait_for_selector("#accounts-table tr[data-row]")
+    page.click("#acct-add")
+    page.wait_for_selector(".modal")
+    page.select_option("#m-type", "oauth")
+    page.wait_for_selector("#m-login:not(.hidden)", timeout=10000)
+
+    assert page.query_selector("#m-fields [data-field='api_key']") is None
+    assert page.is_hidden("#m-save"), "there is nothing to save until the login returns"
+    assert page.is_visible("#m-start-login")
+    # Unconfigured by default, and it must say so rather than fail on the press.
+    page.wait_for_selector("#m-login .note", timeout=10000)
+    panel = page.inner_text("#m-login")
+    assert "oauth.client_id" in panel
+    assert page.query_selector("#m-start-login").is_disabled()
+
+    page.click("#m-cancel")
+    page.wait_for_selector(".modal", state="detached")
+
+
+def test_switching_back_to_an_api_key_restores_the_credential_form(page):
+    page.click(".nav button[data-tab='accounts']")
+    page.click("#acct-add")
+    page.wait_for_selector(".modal")
+    page.select_option("#m-type", "oauth")
+    page.wait_for_selector("#m-login:not(.hidden)")
+    page.select_option("#m-type", "anthropic_api")
+    page.wait_for_selector("#m-fields [data-field='api_key']")
+    assert page.is_visible("#m-save")
+    assert page.is_hidden("#m-start-login")
+    page.click("#m-cancel")
+    page.wait_for_selector(".modal", state="detached")

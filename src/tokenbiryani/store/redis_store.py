@@ -19,8 +19,12 @@ from typing import Any, Dict, List, Optional
 from .base import StateStore
 
 #: Ledger entries are stored as "<amount>|<nonce>" so two identical charges in the
-#: same millisecond remain distinct members of the sorted set.
+#: same millisecond remain distinct members of the sorted set. Usage rows use the
+#: same trick, as "<json>|<nonce>".
 _SEPARATOR = "|"
+
+#: Matches the SQLite backend's retention, so a chart looks the same on either.
+USAGE_RETENTION_SECONDS = 90 * 24 * 3600
 
 
 def _connect(url: str) -> Any:
@@ -107,6 +111,35 @@ class RedisStateStore(StateStore):
         await self.client.zremrangebyscore(key, "-inf", f"({cutoff}")
         members = await self.client.zrangebyscore(key, cutoff, "+inf")
         return sum(_amount(member) for member in members)
+
+    # ---- usage history -------------------------------------------------------
+
+    async def record_usage(self, sample: Dict[str, Any]) -> None:
+        # A sorted set scored by timestamp, exactly like the spend ledger. The
+        # nonce keeps two identical requests in the same instant distinct members.
+        member = json.dumps(sample, separators=(",", ":")) + _SEPARATOR + uuid.uuid4().hex
+        await self.client.zadd(self._key("usage"), {member: float(sample.get("at") or 0.0)})
+
+    async def usage_rows(
+        self, since: float, until: float, account_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        key = self._key("usage")
+        # Trim on read rather than on write: the write is on the request path.
+        await self.client.zremrangebyscore(
+            key, "-inf", f"({time.time() - USAGE_RETENTION_SECONDS}"
+        )
+        # "(" makes the upper bound exclusive so a row exactly on `until` belongs to
+        # the next window, matching the other two backends.
+        members = await self.client.zrangebyscore(key, since, f"({until}")
+        rows: List[Dict[str, Any]] = []
+        for member in members:
+            try:
+                row = json.loads(member.rsplit(_SEPARATOR, 1)[0])
+            except ValueError:
+                continue
+            if account_id is None or row.get("account_id") == account_id:
+                rows.append(row)
+        return rows
 
     # ---- managed keys --------------------------------------------------------
 

@@ -124,6 +124,27 @@ accounts:
   #     model_map:
   #       claude-test-1: claude-3-5-sonnet-v2@20241022
 
+# Subscription accounts (type: oauth), added by logging in from the console.
+#
+# Empty by default and the login refuses until all three are set. Anthropic does not
+# publish the OAuth endpoints its first-party clients use, and this project has never
+# been run against a real subscription session, so it will not guess: a wrong value
+# hard-coded here would look like a working feature. See docs/oauth.md.
+#
+# Read that page before using one at all — subscription sessions send no
+# anthropic-ratelimit-* headers, so these accounts lose headroom routing, binding
+# leases, admission control and the capacity horizon.
+# oauth:
+#   client_id: ""
+#   authorize_url: ""
+#   token_url: ""
+#   # Blank = the provider shows a code and you paste it into the console. Set it to
+#   # http://127.0.0.1:8787/admin/oauth/callback if you can register a callback.
+#   redirect_uri: ""
+#   scopes: []
+#   refresh_skew_seconds: 300      # renew this far ahead of expiry
+#   refresh_interval_seconds: 60   # how often sessions are checked
+
 keys:
   - key: ${TOKENBIRYANI_KEY}
     name: default

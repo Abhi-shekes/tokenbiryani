@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 from ..config import AccountConfig
 from .base import Upstream
@@ -51,7 +51,7 @@ def available_types() -> List[str]:
 #: Entry point group third-party packages publish account types under.
 PLUGIN_GROUP = "tokenbiryani.providers"
 
-BUILTIN_TYPES = ("anthropic_api", "bedrock", "vertex")
+BUILTIN_TYPES = ("anthropic_api", "bedrock", "vertex", "oauth")
 
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_BASE_URL = "https://api.anthropic.com"
@@ -84,10 +84,20 @@ class AnthropicUpstream(Upstream):
         return headers
 
 
-def build_upstream(config: AccountConfig) -> Upstream:
-    """Construct the upstream for an account type, built-in or installed."""
+def build_upstream(
+    config: AccountConfig, token_provider: Optional[Callable[[], str]] = None
+) -> Upstream:
+    """Construct the upstream for an account type, built-in or installed.
+
+    `token_provider` is only meaningful for `oauth` accounts, whose credential is a
+    session the gateway refreshes rather than a value sitting in the config.
+    """
     if config.type in ("anthropic_api", "anthropic"):
         return AnthropicUpstream(config)
+    if config.type == "oauth":
+        from .oauth import OAuthUpstream
+
+        return OAuthUpstream(config, token_provider)
     if config.type == "bedrock":
         from .bedrock import BedrockUpstream
 
