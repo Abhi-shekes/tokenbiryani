@@ -42,7 +42,16 @@ def _fernet(key: bytes):
 
 
 def generate_key() -> bytes:
-    from cryptography.fernet import Fernet
+    # Guarded like _fernet: this is reached on the first attempt to store an
+    # account, and a bare ModuleNotFoundError there tells the operator nothing
+    # about which extra is missing.
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError as exc:  # pragma: no cover - error path only
+        raise SecretError(
+            "storing account credentials needs the cryptography package: "
+            "pip install 'tokenbiryani[secrets]'"
+        ) from exc
 
     return Fernet.generate_key()
 

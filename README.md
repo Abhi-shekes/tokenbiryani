@@ -129,18 +129,27 @@ point is retried silently on another account. A failure **after** it arrives as 
 ## Docker
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export TOKENBIRYANI_KEY=$(docker compose run --rm --no-deps gateway keygen)
-docker compose up
+docker compose up -d      # gateway + Redis + a mock Anthropic
+docker compose down       # stop it
 ```
 
-Brings up the gateway on `:8787` with Redis behind it for shared state. The image runs
-as a non-root user and carries a healthcheck wired to `/healthz`, which reports
-unhealthy exactly when no account is ready.
+Nothing to set first. The stack boots against the mock upstream bundled with the
+package, so it comes up healthy, costs nothing and reaches nothing — then you open
+`http://localhost:8787/console` and add real accounts there.
 
-Binding `0.0.0.0` is the point of a container, so `docker/tokenbiryani.yaml` sets
-`server.allow_remote: true` and defines a key. Without both, the gateway refuses to
-start rather than expose your credentials to the network.
+`./src` is bind-mounted and watched, so editing a file on the host restarts the
+gateway in about a second; `./tests` is mounted too, so
+`docker compose exec gateway pytest -q` runs the suite against the running stack.
+
+The image runs as a non-root user, carries a healthcheck wired to `/healthz`, and
+publishes to `127.0.0.1` rather than your LAN. `docker compose` builds the Dockerfile's
+`dev` target; the default `runtime` target is what ships — wheel only, no source, no
+test dependencies.
+
+> The keys in `docker-compose.yml` are development values in a public repository.
+> Copy `.env.example` to `.env` and replace them before this touches anything real —
+> in particular `TOKENBIRYANI_SECRET_KEY`, which encrypts stored account credentials
+> and must outlive the container. [docs/deployment.md](docs/deployment.md) explains both.
 
 ## Operating it
 

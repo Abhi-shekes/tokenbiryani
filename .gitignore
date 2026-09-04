@@ -1,23 +1,47 @@
-__pycache__/
-*.py[cod]
+# --- local environments ---
 .venv/
 venv/
+env/
+.env
+.env.*
+!.env.example
+
+# --- Python build and cache artefacts ---
+__pycache__/
+*.py[cod]
 *.egg-info/
 dist/
 build/
-site/
+.eggs/
 .pytest_cache/
-.coverage
-htmlcov/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# --- generated docs ---
+site/
+
+# --- editor and OS noise ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- runtime state ---
+# The operator's own config: it holds real credentials. tokenbiryani.example.yaml
+# and docker/tokenbiryani.yaml are the tracked templates.
 tokenbiryani.yaml
 *.db
-# SQLite's WAL sidecars. *.db does not cover these, so they were committed by
-# accident and showed up dirty after every local run.
+*.sqlite3
+# SQLite's WAL sidecars. *.db does not cover these, and they were committed by
+# accident once already.
 *.db-shm
 *.db-wal
-*.sqlite3
-# Credential-encryption keys for stored accounts. Never commit one.
+
+# --- credentials ---
+# The key that encrypts stored account credentials. Never commit one.
 *.key
-.env

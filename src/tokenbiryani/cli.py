@@ -232,6 +232,23 @@ def cmd_strategies(args: argparse.Namespace) -> int:
 
 
 def cmd_keygen(args: argparse.Namespace) -> int:
+    """Two different keys live behind one command, because operators confuse them.
+
+    A virtual key is what clients authenticate with. A secret key encrypts account
+    credentials before they reach the store, and it has to outlive the process that
+    made it — lose it and every stored account is unrecoverable.
+    """
+    if getattr(args, "secret", False):
+        from .core.secrets import SecretError
+        from .core.secrets import generate_key as generate_secret
+
+        try:
+            print(generate_secret().decode("ascii"))
+        except SecretError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+
     from .core.keys import generate_key
 
     print(generate_key())
@@ -242,6 +259,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     from .api.app import create_app
+    from .api.asgi import CONFIG_ENV
     from .config import Config, ConfigError
 
     try:
@@ -275,11 +293,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
             )
             return 1
 
+    # An empty pool used to be fatal. It is now a legitimate first run: accounts can
+    # be added from the console, and the onboarding wizard exists to walk you through
+    # exactly that. Refusing to start would leave nowhere to add them from.
     if not config.accounts:
-        print("config has no accounts; nothing to route to", file=sys.stderr)
-        return 1
+        print(
+            f"no accounts in {args.config} yet — add one at http://{host}:{port}/console",
+            file=sys.stderr,
+        )
 
-    app = create_app(config)
     color = _colors_enabled()
     print(
         "{} {} accounts · strategy {} · http://{}:{}".format(
@@ -292,7 +314,25 @@ def cmd_serve(args: argparse.Namespace) -> int:
     )
     print(f"  console  http://{host}:{port}/console")
     print(f"  api      ANTHROPIC_BASE_URL=http://{host}:{port}")
-    uvicorn.run(app, host=host, port=port, log_level=args.log_level)
+
+    if args.reload:
+        # The reloader re-imports the app in a fresh process, so it needs an import
+        # string rather than the object we already built. The config path travels in
+        # the environment because that new process does not inherit our argv.
+        os.environ[CONFIG_ENV] = args.config
+        print(paint("  reload   watching src/ for changes", "dim", color))
+        uvicorn.run(
+            "tokenbiryani.api.asgi:create",
+            factory=True,
+            host=host,
+            port=port,
+            log_level=args.log_level,
+            reload=True,
+            reload_dirs=args.reload_dir or None,
+        )
+        return 0
+
+    uvicorn.run(create_app(config), host=host, port=port, log_level=args.log_level)
     return 0
 
 
@@ -493,6 +533,17 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
     serve.add_argument("--log-level", default="info")
+    serve.add_argument(
+        "--reload",
+        action="store_true",
+        help="restart on source changes (development; needs the 'dev' extra)",
+    )
+    serve.add_argument(
+        "--reload-dir",
+        action="append",
+        metavar="DIR",
+        help="directory to watch; repeatable. Defaults to uvicorn's own choice.",
+    )
     serve.set_defaults(func=cmd_serve)
 
     status = sub.add_parser("status", help="show the pool")
@@ -515,6 +566,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(func=cmd_doctor)
 
     keygen = sub.add_parser("keygen", help="print a new virtual key")
+    keygen.add_argument(
+        "--secret",
+        action="store_true",
+        help="print a credential-encryption key for TOKENBIRYANI_SECRET_KEY instead",
+    )
     keygen.set_defaults(func=cmd_keygen)
 
     return parser
