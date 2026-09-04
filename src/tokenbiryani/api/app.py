@@ -59,6 +59,17 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
             raise GatewayError(401, result.error, kind="authentication_error")
         return result.key
 
+    def authenticate_admin(request: Request) -> KeyConfig:
+        """/admin exposes account ids, spend and key management. Tenants stay out."""
+        key = authenticate(request)
+        if not key.admin:
+            raise GatewayError(
+                403,
+                f"key {key.name!r} is not an admin key",
+                kind="permission_error",
+            )
+        return key
+
     async def read_body(request: Request) -> Dict[str, Any]:
         raw = await request.body()
         if not raw:
@@ -147,17 +158,17 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
 
     @app.get("/admin/status")
     async def status(request: Request) -> JSONResponse:
-        authenticate(request)
+        authenticate_admin(request)
         return JSONResponse(app.state.gateway.snapshot())
 
     @app.get("/admin/horizon")
     async def horizon(request: Request) -> JSONResponse:
-        authenticate(request)
+        authenticate_admin(request)
         return JSONResponse(app.state.gateway.capacity_horizon())
 
     @app.get("/admin/accounts/{account_id}")
     async def account_detail(request: Request, account_id: str) -> JSONResponse:
-        authenticate(request)
+        authenticate_admin(request)
         gateway: Gateway = app.state.gateway
         account = gateway.accounts.get(account_id)
         if account is None:
@@ -168,22 +179,48 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
 
     @app.post("/admin/reload")
     async def reload(request: Request) -> JSONResponse:
-        authenticate(request)
+        authenticate_admin(request)
         return JSONResponse(app.state.gateway.reload_from_path())
 
     @app.get("/admin/keys")
     async def keys(request: Request) -> JSONResponse:
-        authenticate(request)
+        authenticate_admin(request)
         return JSONResponse({"keys": app.state.gateway.keys.redacted()})
+
+    @app.post("/admin/keys")
+    async def create_key(request: Request) -> JSONResponse:
+        authenticate_admin(request)
+        payload = await read_body(request)
+        name = str(payload.get("name") or "")
+        plaintext, record = await app.state.gateway.create_key(
+            name,
+            models=payload.get("models"),
+            pool=payload.get("pool"),
+            rpm=payload.get("rpm"),
+            spend_cap_usd=payload.get("spend_cap_usd"),
+            priority=payload.get("priority"),
+            max_wait_seconds=payload.get("max_wait_seconds"),
+            admin=payload.get("admin"),
+        )
+        # The only time the plaintext exists outside the caller's hands.
+        return JSONResponse({"key": plaintext, "record": record}, status_code=201)
+
+    @app.delete("/admin/keys/{name}")
+    async def revoke_key(request: Request, name: str) -> JSONResponse:
+        authenticate_admin(request)
+        removed = await app.state.gateway.revoke_key(name)
+        if not removed:
+            return _error(404, f"no managed key named {name!r}", "not_found_error")
+        return JSONResponse({"revoked": name})
 
     @app.get("/admin/requests")
     async def requests(request: Request, limit: int = 50) -> JSONResponse:
-        authenticate(request)
+        authenticate_admin(request)
         return JSONResponse({"requests": app.state.gateway.events.recent(limit)})
 
     @app.get("/admin/requests/{request_id}")
     async def request_detail(request: Request, request_id: str) -> JSONResponse:
-        authenticate(request)
+        authenticate_admin(request)
         found = app.state.gateway.events.get(request_id)
         if found is None:
             return _error(404, f"no such request: {request_id}", "not_found_error")
@@ -191,7 +228,7 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
 
     @app.get("/admin/events")
     async def events(request: Request) -> StreamingResponse:
-        authenticate(request)
+        authenticate_admin(request)
         log = app.state.gateway.events
 
         async def feed():

@@ -6,10 +6,12 @@ gateway process; a leaked virtual key costs you one revocation, not a rotation.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import secrets
+import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
 from ..config import KeyConfig
 
@@ -45,35 +47,92 @@ class AuthResult:
     status: int = 401
 
 
+def hash_key(key: str) -> str:
+    """Managed keys are stored hashed. A leaked store is not a leaked key."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def record_from_config(key: KeyConfig, plaintext: str) -> Dict[str, object]:
+    return {
+        "name": key.name,
+        "key_hash": hash_key(plaintext),
+        "models": list(key.models),
+        "pool": list(key.pool),
+        "rpm": key.rpm,
+        "spend_cap_usd": key.spend_cap_usd,
+        "priority": key.priority,
+        "max_wait_seconds": key.max_wait_seconds,
+        "admin": key.admin,
+        "created_at": time.time(),
+    }
+
+
+def config_from_record(record: Mapping[str, object]) -> KeyConfig:
+    return KeyConfig(
+        key="",
+        name=str(record.get("name") or ""),
+        models=list(record.get("models") or ["*"]),
+        pool=list(record.get("pool") or []),
+        rpm=record.get("rpm"),  # type: ignore[arg-type]
+        spend_cap_usd=record.get("spend_cap_usd"),  # type: ignore[arg-type]
+        priority=str(record.get("priority") or "interactive"),
+        max_wait_seconds=record.get("max_wait_seconds"),  # type: ignore[arg-type]
+        admin=bool(record.get("admin")),
+    )
+
+
 class KeyRegistry:
+    """Config keys are declared by the operator; managed keys are minted at runtime.
+
+    Config keys are compared in plaintext (they live in the operator's own file).
+    Managed keys are only ever stored as a hash, so the plaintext exists exactly once,
+    in the response that created it.
+    """
+
     def __init__(self, keys: List[KeyConfig]) -> None:
         self._keys = list(keys)
+        self._managed: List[Dict[str, object]] = []
 
     @property
     def keys(self) -> List[KeyConfig]:
         return list(self._keys)
 
+    def set_managed(self, records: List[Dict[str, object]]) -> None:
+        self._managed = list(records)
+
     @property
     def open_access(self) -> bool:
-        """No keys configured means loopback-only, unauthenticated. Refused remotely."""
-        return not self._keys
+        """No keys at all means loopback-only, unauthenticated. Refused remotely."""
+        return not self._keys and not self._managed
 
     def authenticate(self, presented: Optional[str]) -> AuthResult:
         if self.open_access:
-            return AuthResult(True, KeyConfig(key="", name="anonymous"))
+            # Unauthenticated loopback development: full access, including admin.
+            return AuthResult(True, KeyConfig(key="", name="anonymous", admin=True))
         if not presented:
             return AuthResult(False, error="missing credentials")
         for candidate in self._keys:
             # Constant-time compare: key checking must not leak length or prefix.
             if hmac.compare_digest(candidate.key, presented):
                 return AuthResult(True, candidate)
+        digest = hash_key(presented)
+        for record in self._managed:
+            stored = str(record.get("key_hash") or "")
+            if stored and hmac.compare_digest(stored, digest):
+                return AuthResult(True, config_from_record(record))
         return AuthResult(False, error="invalid key")
 
     def by_name(self, name: str) -> Optional[KeyConfig]:
         for candidate in self._keys:
             if candidate.name == name:
                 return candidate
+        for record in self._managed:
+            if record.get("name") == name:
+                return config_from_record(record)
         return None
+
+    def is_config_key(self, name: str) -> bool:
+        return any(candidate.name == name for candidate in self._keys)
 
     def redacted(self) -> List[Dict[str, object]]:
         out = []
@@ -82,10 +141,29 @@ class KeyRegistry:
                 {
                     "name": key.name,
                     "key": mask_key(key.key),
+                    "source": "config",
                     "models": key.models,
                     "pool": key.pool or "all",
                     "rpm": key.rpm,
                     "spend_cap_usd": key.spend_cap_usd,
+                    "priority": key.priority,
+                    "admin": key.admin,
+                }
+            )
+        for record in self._managed:
+            key = config_from_record(record)
+            out.append(
+                {
+                    "name": key.name,
+                    "key": "(hashed)",
+                    "source": "managed",
+                    "models": key.models,
+                    "pool": key.pool or "all",
+                    "rpm": key.rpm,
+                    "spend_cap_usd": key.spend_cap_usd,
+                    "priority": key.priority,
+                    "admin": key.admin,
+                    "created_at": record.get("created_at"),
                 }
             )
         return out

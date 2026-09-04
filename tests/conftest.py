@@ -41,7 +41,8 @@ def make_config(
             )
             for account_id in account_ids
         ],
-        "keys": [{"key": "bir_test", "name": "default"}],
+        # The operator's own key in tests; /admin requires admin: true.
+        "keys": [{"key": "bir_test", "name": "default", "admin": True}],
     }
     for section, values in (overrides or {}).items():
         raw.setdefault(section, {})

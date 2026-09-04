@@ -12,7 +12,7 @@ gateway shut and stay that way.
 from __future__ import annotations
 
 import abc
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 #: Spend scopes. Keys are billed to whoever presented them; accounts to the credential.
 SCOPE_KEY = "key"
@@ -47,6 +47,18 @@ class StateStore(abc.ABC):
     @abc.abstractmethod
     async def spend_by_scope(self, scope: str, window_seconds: float) -> Dict[str, float]:
         """Every name in a scope, for hydrating in-memory counters at startup."""
+
+    @abc.abstractmethod
+    async def put_key(self, record: Dict[str, object]) -> None:
+        """Store a managed key record. Records hold a hash, never the key itself."""
+
+    @abc.abstractmethod
+    async def delete_key(self, name: str) -> bool:
+        ...
+
+    @abc.abstractmethod
+    async def list_keys(self) -> List[Dict[str, object]]:
+        ...
 
     async def startup(self) -> None:
         return None

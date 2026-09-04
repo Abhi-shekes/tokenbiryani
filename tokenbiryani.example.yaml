@@ -98,6 +98,9 @@ keys:
     pool: []             # empty means every account
     rpm: null
     spend_cap_usd: null
+    # Required to reach /admin/* — pool snapshot, request inspector, key management.
+    # Issue tenant keys without it: /admin exposes account ids and spend.
+    admin: false
     # interactive | batch — batch yields the queue when the pool is saturated
     priority: interactive
     # Seconds this key's requests wait for capacity. Null falls back to

@@ -121,6 +121,7 @@ tokenbiryani status --json   # same data, for scripts
 | `GET /healthz` | 200 while any account is ready |
 | `GET /metrics` | Prometheus |
 | `GET /admin/status` | pool snapshot |
+| `POST /admin/keys` · `DELETE /admin/keys/{name}` | mint and revoke keys at runtime |
 | `GET /admin/accounts/{id}` | one account: limits, error breakdown by class, its own recent requests |
 | `POST /admin/reload` | re-read the config file |
 | `GET /admin/requests/{id}` | **why that request went where it did** — attempt chain, per-candidate scores, verdicts |
@@ -129,6 +130,24 @@ tokenbiryani status --json   # same data, for scripts
 
 The request inspector is the point. `filtered — cooling, 27s remaining` is a complete
 answer; "load balanced" is not.
+
+**`/admin/*` requires a key with `admin: true`.** It exposes account ids, spend and key
+management, so a tenant key must not reach it. A gateway with no keys configured at all
+is loopback development mode and stays fully open.
+
+### Managing keys at runtime
+
+```bash
+curl -sX POST localhost:8787/admin/keys -H "x-api-key: $ADMIN_KEY" \
+  -d '{"name":"tenant-1","pool":["acct-02"],"rpm":60,"spend_cap_usd":5}'
+# -> {"key": "bir_...", "record": {...}}   the plaintext appears exactly once
+
+curl -sX DELETE localhost:8787/admin/keys/tenant-1 -H "x-api-key: $ADMIN_KEY"
+```
+
+Minted keys are stored **hashed**, so a leaked state store is not a leaked key, and they
+live in the shared store — one instance honours a key another minted. Keys declared in
+the config file belong to the file: the API will not revoke them.
 
 ### The spill lane
 
@@ -203,8 +222,9 @@ circuit breakers, session affinity and cache accounting, admission control and a
 priority queue, virtual keys with model/pool/rpm/spend scoping, Prometheus metrics,
 structured logs, config hot reload, the admin API, and the CLI. Request priority with a
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
-and windowed spend, and a Redis store for multi-instance deployments. 148 tests, plus an
-end-to-end smoke test over real sockets (`scripts/smoke.sh`).
+and windowed spend, a Redis store for multi-instance deployments, and runtime key
+management behind an admin boundary. 161 tests, plus an end-to-end smoke test over real
+sockets (`scripts/smoke.sh`).
 
 Not built yet: the web console, the Redis state store for multi-instance, Bedrock and
 Vertex adapters, and the Message Batches spill lane. See `PLAN.md` for the roadmap and

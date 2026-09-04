@@ -165,6 +165,9 @@ accounts:
 keys:
   - key: {key}
     name: default
+    # Required to reach /admin/* — the pool snapshot, the request inspector, and
+    # key management. Issue tenant keys without it.
+    admin: true
 
 # Costs are only reported, and spend caps only enforced, for models named here.
 # USD per million tokens. Fill these in from Anthropic's current pricing page.

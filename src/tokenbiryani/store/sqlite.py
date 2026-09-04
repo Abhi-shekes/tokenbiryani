@@ -8,11 +8,12 @@ on the loop's executor.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .base import StateStore
 
@@ -31,6 +32,11 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
     amount REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS spend_lookup ON spend_ledger (scope, name, at);
+
+CREATE TABLE IF NOT EXISTS managed_keys (
+    name    TEXT PRIMARY KEY,
+    record  TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS key_requests (
     key_name TEXT NOT NULL,
@@ -164,6 +170,32 @@ class SqliteStateStore(StateStore):
                 (scope, name, time.time() - window_seconds),
             ).fetchone()
             return float(row[0]) if row else 0.0
+
+        return await self._run(query)
+
+    async def put_key(self, record: Dict[str, Any]) -> None:
+        def write(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                "INSERT INTO managed_keys (name, record) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET record = excluded.record",
+                (str(record["name"]), json.dumps(record)),
+            )
+            conn.commit()
+
+        await self._run(write)
+
+    async def delete_key(self, name: str) -> bool:
+        def write(conn: sqlite3.Connection) -> bool:
+            cursor = conn.execute("DELETE FROM managed_keys WHERE name = ?", (name,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._run(write)
+
+    async def list_keys(self) -> List[Dict[str, Any]]:
+        def query(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+            rows = conn.execute("SELECT record FROM managed_keys").fetchall()
+            return [json.loads(row[0]) for row in rows]
 
         return await self._run(query)
 

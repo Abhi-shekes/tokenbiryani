@@ -54,6 +54,7 @@ accounts:
 keys:
   - key: $KEY
     name: smoke
+    admin: true
 YAML
 
 wait_for "http://127.0.0.1:$UPSTREAM_PORT/v1/models" "mock upstream"

@@ -11,9 +11,10 @@ Requires the optional dependency:  pip install "tokenbiryani[redis]"
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .base import StateStore
 
@@ -106,6 +107,26 @@ class RedisStateStore(StateStore):
         await self.client.zremrangebyscore(key, "-inf", f"({cutoff}")
         members = await self.client.zrangebyscore(key, cutoff, "+inf")
         return sum(_amount(member) for member in members)
+
+    # ---- managed keys --------------------------------------------------------
+
+    async def put_key(self, record: Dict[str, Any]) -> None:
+        await self.client.hset(
+            self._key("keys"), str(record["name"]), json.dumps(record)
+        )
+
+    async def delete_key(self, name: str) -> bool:
+        return bool(await self.client.hdel(self._key("keys"), name))
+
+    async def list_keys(self) -> List[Dict[str, Any]]:
+        raw = await self.client.hgetall(self._key("keys"))
+        records = []
+        for value in (raw or {}).values():
+            try:
+                records.append(json.loads(value))
+            except ValueError:
+                continue
+        return records
 
     async def spend_by_scope(self, scope: str, window_seconds: float) -> Dict[str, float]:
         names = await self.client.smembers(self._key("spend-names", scope))

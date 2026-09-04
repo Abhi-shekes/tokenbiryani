@@ -146,6 +146,9 @@ class KeyConfig:
     #: How long this key's requests will wait for capacity before being told to
     #: come back. Falls back to queue.default_max_wait_seconds.
     max_wait_seconds: Optional[float] = None
+    #: Required to reach /admin/*. A tenant key must not be able to read the pool's
+    #: account ids and spend, let alone mint more keys.
+    admin: bool = False
 
     def supports_model(self, model: str) -> bool:
         for pattern in self.models:

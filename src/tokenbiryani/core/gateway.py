@@ -31,7 +31,7 @@ from ..store.base import SCOPE_ACCOUNT, SCOPE_KEY, StateStore, build_store
 from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
-from .keys import KeyRegistry
+from .keys import KeyRegistry, generate_key, record_from_config
 from .limits import TokenEstimate, estimate_request
 from .queue import (
     MAX_WAIT_HEADER,
@@ -139,6 +139,7 @@ class Gateway:
             )
         await self.store.startup()
         await self.hydrate_spend()
+        await self.refresh_keys()
 
     async def hydrate_spend(self) -> None:
         """Load each account's windowed spend from the store.
@@ -154,13 +155,68 @@ class Gateway:
                 account.spend_usd = total
 
     async def resync_spend(self, interval: float = 60.0) -> None:
-        """Re-read spend periodically so the cached figure cannot drift past the window."""
+        """Re-read spend and managed keys so this instance cannot drift from the store."""
         while True:
             await asyncio.sleep(interval)
             try:
                 await self.hydrate_spend()
+                await self.refresh_keys()
             except Exception as exc:  # noqa: BLE001 - a store blip must not kill routing
-                logger.warning("spend resync failed: %s", exc)
+                logger.warning("state resync failed: %s", exc)
+
+    async def refresh_keys(self) -> None:
+        """Load managed keys from the store into the registry."""
+        self.keys.set_managed(await self.store.list_keys())
+
+    async def create_key(self, name: str, **options: Any) -> Tuple[str, Dict[str, Any]]:
+        """Mint a managed key. The plaintext is returned once and never stored."""
+        name = (name or "").strip()
+        if not name:
+            raise GatewayError(400, "a key needs a name", kind="invalid_request_error")
+        await self.refresh_keys()
+        if self.keys.by_name(name) is not None:
+            raise GatewayError(
+                409, f"a key named {name!r} already exists", kind="invalid_request_error"
+            )
+
+        pool = list(options.get("pool") or [])
+        unknown = [account_id for account_id in pool if account_id not in self.accounts]
+        if unknown:
+            raise GatewayError(
+                400,
+                "unknown account(s) in pool: {}".format(", ".join(sorted(unknown))),
+                kind="invalid_request_error",
+            )
+
+        plaintext = generate_key()
+        template = KeyConfig(
+            key="",
+            name=name,
+            models=list(options.get("models") or ["*"]),
+            pool=pool,
+            rpm=options.get("rpm"),
+            spend_cap_usd=options.get("spend_cap_usd"),
+            priority=str(options.get("priority") or "interactive"),
+            max_wait_seconds=options.get("max_wait_seconds"),
+            admin=bool(options.get("admin")),
+        )
+        record = record_from_config(template, plaintext)
+        await self.store.put_key(record)
+        await self.refresh_keys()
+        redacted = {k: v for k, v in record.items() if k != "key_hash"}
+        return plaintext, redacted
+
+    async def revoke_key(self, name: str) -> bool:
+        """Revoke a managed key. Config keys belong to the file, not to the API."""
+        if self.keys.is_config_key(name):
+            raise GatewayError(
+                409,
+                f"{name!r} is declared in the config file; remove it there and reload",
+                kind="invalid_request_error",
+            )
+        removed = await self.store.delete_key(name)
+        await self.refresh_keys()
+        return removed
 
     def reload(self, config: Config) -> Dict[str, Any]:
         """Swap in a new config without dropping in-flight state.
@@ -204,8 +260,10 @@ class Gateway:
             self.accounts.pop(account_id, None)
             self.upstreams.pop(account_id, None)
 
+        managed = list(self.keys._managed)  # noqa: SLF001 - same object's own state
         self.config = config
         self.keys = KeyRegistry(config.keys)
+        self.keys.set_managed(managed)
         self.router = Router(config.routing.strategy, config.routing.weights)
         self.gate.max_size = config.queue.max_size
         self.gate.default_max_wait = config.queue.default_max_wait_seconds
