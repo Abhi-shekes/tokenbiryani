@@ -28,6 +28,13 @@ It also runs as a real server for smoke tests:
 python -m tokenbiryani.testing.server --port 9911 --accounts key-a,key-b
 ```
 
+## The benchmark
+
+`benchmarks/cache_affinity.py` is the evidence for the project's central claim, and
+`tests/test_benchmark.py` fails if sticky routing ever stops beating cache-blind
+routing. A change to the router that improves throughput while quietly costing cache
+hits is a regression here, which is the point.
+
 ## State stores
 
 `memory`, `sqlite` and `redis` are held to identical behaviour by one parametrised

@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import hashlib
 import json
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Deque, Dict, List, Optional
 
 import httpx
@@ -90,6 +91,14 @@ def slow_stream(delay: float = 0.05, deltas: int = 3) -> Behavior:
 
 
 @dataclass
+class CacheOutcome:
+    input_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    hit: bool
+
+
+@dataclass
 class MockAccount:
     api_key: str
     requests_limit: int = 1000
@@ -104,6 +113,14 @@ class MockAccount:
 
     script: Deque[Behavior] = field(default_factory=deque)
     received: List[Dict[str, Any]] = field(default_factory=list)
+    #: Model the prompt cache. Off by default so scripted behaviours stay exact;
+    #: the benchmark turns it on, because cache economics are what it measures.
+    cache_aware: bool = False
+    cache_ttl: float = 300.0
+    cached_prefixes: Dict[str, float] = field(default_factory=dict)
+    cache_hits: int = 0
+    cache_misses: int = 0
+
     #: How many polls a submitted batch reports as in_progress before it ends.
     batch_polls_before_ready: int = 1
     #: Set to fail batch submission, e.g. to prove the gateway falls back to queueing.
@@ -143,6 +160,34 @@ class MockAccount:
         self.requests_remaining = max(0, (self.requests_remaining or 0) - 1)
         self.input_remaining = max(0, (self.input_remaining or 0) - behavior.input_tokens)
         self.output_remaining = max(0, (self.output_remaining or 0) - behavior.output_tokens)
+
+    def cache_lookup(self, body: Dict[str, Any], now: float) -> CacheOutcome:
+        """Was this request's stable prefix already cached on this credential?
+
+        Anthropic's cache is per-credential, which is the entire reason the router
+        has an affinity term. The mock reproduces that scoping and nothing else.
+        """
+        # The cacheable prefix is a conversation's stable head, not just the system
+        # prompt: system, tools, and the opening message. Two sessions sharing a
+        # system prompt still cache separately once their histories diverge.
+        head = {k: body.get(k) for k in ("system", "tools") if body.get(k) is not None}
+        messages = body.get("messages")
+        if isinstance(messages, list) and messages:
+            head["opening"] = messages[0]
+        prefix = json.dumps(head, sort_keys=True)
+        prefix_tokens = int(len(prefix) / 3.5)
+        if prefix_tokens <= 0:
+            return CacheOutcome(0, 0, 0, False)
+
+        key = hashlib.sha256(prefix.encode("utf-8")).hexdigest()
+        expires = self.cached_prefixes.get(key)
+        hit = expires is not None and expires > now
+        self.cached_prefixes[key] = now + self.cache_ttl
+        if hit:
+            self.cache_hits += 1
+            return CacheOutcome(0, prefix_tokens, 0, True)
+        self.cache_misses += 1
+        return CacheOutcome(0, 0, prefix_tokens, False)
 
     def exhaust(self) -> None:
         """Drain this account's budget without changing its reset time."""
@@ -279,6 +324,14 @@ class MockAnthropic:
                         "message": "your account does not have access to this model",
                     },
                 },
+            )
+
+        if account.cache_aware and behavior.kind == "ok":
+            outcome = account.cache_lookup(body, time.time())
+            behavior = replace(
+                behavior,
+                cache_read_tokens=outcome.cache_read_tokens,
+                cache_creation_tokens=outcome.cache_creation_tokens,
             )
 
         account.consume(behavior)

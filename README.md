@@ -38,6 +38,26 @@ routing. This is a depth play on one provider, and four things fall out of that.
 | **Claude Code** | First-class client — long streaming turns, huge cached prefixes, tool loops | Treated as generic chat completion |
 | **Failover** | Transparent up to the first streamed token, with an explicit documented boundary | Usually all-or-nothing |
 
+### The benchmark
+
+The same workload — 24 concurrent conversations, 8 turns each, across 4 accounts —
+under each strategy, against a mock upstream that models Anthropic's per-credential
+prompt cache. Prices are illustrative ratios, not a price list.
+
+| Strategy | Cache hit | Cache breaks | Cost | vs sticky | Billed input |
+|---|---|---|---|---|---|
+| sticky_headroom | 78.6% | 0 | $0.4923 | — | 433,152 |
+| round_robin | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
+| least_loaded | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
+| headroom | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
+
+**Cache-blind routing costs 1.94x here.** And note that round-robin, least-loaded and
+most-headroom all pay exactly the same penalty: any strategy that ignores affinity
+visits every account once per conversation, so they all take the same number of cache
+misses. The penalty is inherent to cache-blindness, not a quirk of round-robin.
+
+Reproduce it with `python benchmarks/cache_affinity.py`. `tests/test_benchmark.py` fails if sticky ever stops winning.
+
 ### The prompt cache is the constraint
 
 Anthropic's cache is scoped per credential. A Claude Code turn resends a large stable
@@ -275,8 +295,8 @@ structured logs, config hot reload, the admin API, and the CLI. Request priority
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
 and windowed spend, a Redis store for multi-instance deployments, and runtime key
 management behind an admin boundary, plus Bedrock and Vertex adapters and pluggable
-routing strategies, and the operator console. 190 tests, plus an end-to-end smoke test
-over real sockets (`scripts/smoke.sh`).
+routing strategies, and the operator console. 196 tests, a reproducible benchmark, and
+an end-to-end smoke test over real sockets (`scripts/smoke.sh`).
 
 All eight milestones in `PLAN.md` are built. `docs/UI-DESIGN.md` is the console's design
 brief, and the console follows it.
