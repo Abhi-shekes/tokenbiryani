@@ -72,6 +72,9 @@ Set `routing.strategy`:
 | `round_robin` | Baseline. Ignores every signal, on purpose — it's there to benchmark against. |
 
 Weights are config, not code. See `routing.weights` in `tokenbiryani.example.yaml`.
+`tokenbiryani strategies` lists what this install has, including any installed plugins:
+a strategy can ship in its own package under the `tokenbiryani.strategies` entry point,
+supplying either weights or its own scoring.
 
 ### Failure handling
 

@@ -8,12 +8,37 @@ weighted terms and a verdict, and that travels straight through to the inspector
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence
 
 from ..config import RoutingWeights
 from .account import AccountRuntime
 from .limits import TokenEstimate
+
+logger = logging.getLogger("tokenbiryani")
+
+
+#: Entry point group third-party packages publish strategies under.
+PLUGIN_GROUP = "tokenbiryani.strategies"
+
+
+class Scorer(Protocol):
+    """A strategy that computes its own terms instead of reweighting the built-ins.
+
+    Terms are summed to produce the score, and each one is shown per candidate in the
+    request inspector — so name them for a reader, not for the arithmetic.
+    """
+
+    def terms(
+        self,
+        account: AccountRuntime,
+        ctx: RoutingContext,
+        weights: RoutingWeights,
+        index: int,
+        count: int,
+    ) -> Dict[str, float]:
+        ...  # pragma: no cover - protocol
 
 
 @dataclass
@@ -45,6 +70,73 @@ STRATEGIES: Dict[str, StrategySpec] = {
         affinity=0.0, headroom=0.0, priority=0.0, load=0.0, errors=0.0, cost=0.0, rotate=True
     ),
 }
+
+
+#: Strategies registered at runtime, by this process or by a plugin.
+CUSTOM_STRATEGIES: Dict[str, Scorer] = {}
+
+_plugins_loaded = False
+
+
+def register_strategy(name: str, strategy) -> None:
+    """Register a strategy under `name`.
+
+    Accepts a StrategySpec (reweights the built-in terms) or any object with a
+    `terms(...)` method (computes its own).
+    """
+    if isinstance(strategy, StrategySpec):
+        STRATEGIES[name] = strategy
+        CUSTOM_STRATEGIES.pop(name, None)
+        return
+    if not hasattr(strategy, "terms"):
+        raise TypeError(
+            f"strategy {name!r} must be a StrategySpec or expose a terms() method"
+        )
+    CUSTOM_STRATEGIES[name] = strategy
+    STRATEGIES.pop(name, None)
+
+
+def load_plugin_strategies(force: bool = False) -> List[str]:
+    """Import strategies published under the `tokenbiryani.strategies` entry point.
+
+    A plugin that fails to import is logged and skipped: a broken third-party
+    package must not stop the gateway from starting on its built-in strategies.
+    """
+    global _plugins_loaded
+    if _plugins_loaded and not force:
+        return []
+    _plugins_loaded = True
+    loaded: List[str] = []
+    for entry in _entry_points(PLUGIN_GROUP):
+        try:
+            resolved = entry.load()
+            if callable(resolved) and not isinstance(resolved, StrategySpec):
+                candidate = resolved() if not hasattr(resolved, "terms") else resolved
+            else:
+                candidate = resolved
+            register_strategy(entry.name, candidate)
+            loaded.append(entry.name)
+        except Exception as exc:  # noqa: BLE001 - a bad plugin must not be fatal
+            logger.warning("could not load routing strategy %r: %s", entry.name, exc)
+    return loaded
+
+
+def _entry_points(group: str):
+    """importlib.metadata changed shape in 3.10; support both."""
+    try:
+        from importlib.metadata import entry_points
+    except ImportError:  # pragma: no cover - Python < 3.8 only
+        return []
+    found = entry_points()
+    selector = getattr(found, "select", None)
+    if selector is not None:
+        return list(selector(group=group))
+    return list(found.get(group, []))
+
+
+def available_strategies() -> List[str]:
+    load_plugin_strategies()
+    return sorted(set(STRATEGIES) | set(CUSTOM_STRATEGIES))
 
 
 @dataclass
@@ -106,14 +198,16 @@ def _jitter(session_key: str, account_id: str) -> float:
 
 class Router:
     def __init__(self, strategy: str, weights: RoutingWeights) -> None:
-        if strategy not in STRATEGIES:
+        load_plugin_strategies()
+        if strategy not in STRATEGIES and strategy not in CUSTOM_STRATEGIES:
             raise ValueError(
                 "unknown routing strategy {!r}; known: {}".format(
-                    strategy, ", ".join(sorted(STRATEGIES))
+                    strategy, ", ".join(available_strategies())
                 )
             )
         self.strategy = strategy
-        self.spec = STRATEGIES[strategy]
+        self.scorer: Optional[Scorer] = CUSTOM_STRATEGIES.get(strategy)
+        self.spec = STRATEGIES.get(strategy, StrategySpec())
         self.weights = weights
         self._cursor = 0
 
@@ -209,6 +303,8 @@ class Router:
         low_tier: float,
         tier_spread: float,
     ) -> Dict[str, float]:
+        if self.scorer is not None:
+            return self.scorer.terms(account, ctx, self.weights, index, count)
         w, s = self.weights, self.spec
         if s.rotate:
             # Distance forward from the cursor; the account at the cursor scores highest.

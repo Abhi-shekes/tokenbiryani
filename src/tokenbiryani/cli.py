@@ -201,6 +201,29 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_strategies(args: argparse.Namespace) -> int:
+    from .core.router import CUSTOM_STRATEGIES, available_strategies
+
+    color = _colors_enabled()
+    builtin = {
+        "sticky_headroom": "affinity, then most headroom (default)",
+        "headroom": "pure most-available; for stateless batch traffic",
+        "cost_tiered": "drain cheap accounts first, spill upward",
+        "priority": "strict ordered failover: primary, then backup",
+        "least_loaded": "baseline",
+        "round_robin": "baseline; ignores every signal on purpose",
+    }
+    for name in available_strategies():
+        if name in builtin:
+            note = builtin[name]
+            origin = ""
+        else:
+            note = "custom scorer" if name in CUSTOM_STRATEGIES else "custom weights"
+            origin = paint("  (plugin)", "brand", color)
+        print("  {:<18}{}{}".format(name, paint(note, "dim", color), origin))
+    return 0
+
+
 def cmd_keygen(args: argparse.Namespace) -> int:
     from .core.keys import generate_key
 
@@ -323,6 +346,9 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--json", action="store_true")
     status.add_argument("--no-color", action="store_true")
     status.set_defaults(func=cmd_status)
+
+    strategies = sub.add_parser("strategies", help="list routing strategies")
+    strategies.set_defaults(func=cmd_strategies)
 
     keygen = sub.add_parser("keygen", help="print a new virtual key")
     keygen.set_defaults(func=cmd_keygen)

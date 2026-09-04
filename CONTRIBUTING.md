@@ -41,6 +41,11 @@ Both live behind clean interfaces with the mock available to test against:
 
 - **A routing strategy.** Add a `StrategySpec` to `core/router.py`. Scoring already
   produces per-candidate terms for the inspector, so a new strategy is mostly weights.
+  A strategy can also ship in its own package — publish it under the
+  `tokenbiryani.strategies` entry point group and `tokenbiryani strategies` will list
+  it. Publish either a `StrategySpec` (reweights the built-in terms) or an object with
+  a `terms()` method (computes its own). A plugin that fails to import is logged and
+  skipped, never fatal.
 - **A provider adapter.** Implement `providers.base.Upstream` — `url`, `auth_headers`,
   and optionally override `send`/`open_stream`. Bedrock and Vertex are open.
 
