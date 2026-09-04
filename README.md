@@ -264,6 +264,9 @@ silently billing against stale numbers.
 
 ## Status
 
+All eight milestones in `PLAN.md` are implemented and tested; see `TODO.md` for the
+table and for what was deliberately left out.
+
 Working today: passthrough and streaming, multi-account pooling, the error taxonomy,
 retry and failover, the rate-limit mirror, token estimation and leases, headroom scoring,
 circuit breakers, session affinity and cache accounting, admission control and a bounded

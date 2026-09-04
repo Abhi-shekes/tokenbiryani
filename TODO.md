@@ -1,24 +1,26 @@
-# Build TODO — M0 through M3
+# Build status
 
-All complete. `pytest` = 86 passed; `bash scripts/smoke.sh` = all checks passed.
+All eight milestones in [PLAN.md](PLAN.md) are implemented and tested.
 
-- [x] 01 Repo scaffolding: pyproject, LICENSE, gitignore, package skeleton
-- [x] 02 Config + Account model + registry (tokenbiryani.yaml, env interpolation)
-- [x] 03 Error taxonomy
-- [x] 04 Rate-limit mirror, token estimation, atomic leases
-- [x] 05 Health state machine + circuit breaker
-- [x] 06 StateStore interface + in-memory implementation
-- [x] 07 Session affinity + prefix fingerprinting
-- [x] 08 Router: strategy protocol + 5 strategies
-- [x] 09 Admission control + priority wait queue
-- [x] 10 Upstream protocol + Anthropic API adapter
-- [x] 11 Passthrough proxy: first-token buffering + transparent retry
-- [x] 12 Virtual keys + auth
-- [x] 13 FastAPI app: /v1/messages, /v1/models, count_tokens, /healthz, /metrics, /admin/*
-- [x] 14 Observability: event ring buffer, metrics, structured logs
-- [x] 15 CLI: init / serve / status
-- [x] 16 Mock Anthropic upstream harness
-- [x] 17 Test suite against the mock
-- [x] 18 Full suite green
-- [x] 19 End-to-end smoke test
-- [x] 20 Docs (README, CONTRIBUTING, SECURITY, ADRs) + CI
+`pytest` = 189 passed, 1 skipped (the skipped one runs against a real Redis when
+`TOKENBIRYANI_REDIS_URL` is set). `ruff check .` clean. `bash scripts/smoke.sh` passes
+end to end over real sockets.
+
+| | Milestone | Status |
+|---|---|---|
+| M0 | Spike — passthrough, streaming | done |
+| M1 | Pool — failover, error taxonomy, mock harness, CLI | done |
+| M2 | Smart routing — limit mirror, leases, headroom, breakers | done |
+| M3 | Continuity — affinity, fingerprinting, cache accounting | done |
+| M4 | Queue — admission, priority, deadlines, batch spill lane | done |
+| M5 | Observability — metrics, logs, admin API, operator console | done |
+| M6 | Multi-tenant — virtual keys, spend caps, SQLite + Redis stores | done |
+| M7 | Breadth — Bedrock and Vertex adapters, strategy plugins | done |
+
+## Not built, and deliberately
+
+- **No OAuth / subscription-account adapter.** See [ADR-0003](docs/adr/0003-api-keys-only.md).
+- **Config is read-only over HTTP.** `POST /admin/reload` re-reads the file; the API
+  will not write it. Keys are the exception, because they are credentials rather than
+  configuration.
+- **No price list.** Costs are reported only for models named under `pricing:`.
