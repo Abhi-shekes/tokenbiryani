@@ -78,7 +78,8 @@ accounts:
   - id: acct-01
     type: anthropic_api
     api_key: ${ANTHROPIC_API_KEY}
-    base_url: https://api.anthropic.com
+    # base_url is an override; omit it to use the adapter's own default.
+    # base_url: https://api.anthropic.com
     priority: 0.0        # nudge for the `priority` strategy
     cost_tier: 1.0       # relative cost, used by `cost_tiered`
     models: ["*"]        # allowlist; supports trailing wildcards
@@ -90,6 +91,25 @@ accounts:
     type: anthropic_api
     api_key: ${ANTHROPIC_API_KEY_2}
     cost_tier: 1.0
+
+  # Bedrock and Vertex accounts share the pool with API keys, so a request can fail
+  # over from one to the other. options is untyped and provider-specific.
+  # - id: acct-bedrock
+  #   type: bedrock              # pip install "tokenbiryani[bedrock]"
+  #   cost_tier: 1.2
+  #   options:
+  #     region: us-east-1
+  #     profile: default         # omit for the ambient AWS credential chain
+  #     model_map:
+  #       claude-test-1: anthropic.claude-3-5-sonnet-20241022-v2:0
+  #
+  # - id: acct-vertex
+  #   type: vertex               # pip install "tokenbiryani[vertex]"
+  #   options:
+  #     project: my-project
+  #     region: us-central1
+  #     model_map:
+  #       claude-test-1: claude-3-5-sonnet-v2@20241022
 
 keys:
   - key: ${TOKENBIRYANI_KEY}

@@ -44,7 +44,9 @@ class AccountConfig:
     id: str
     type: str = "anthropic_api"
     api_key: str = ""
-    base_url: str = "https://api.anthropic.com"
+    #: Override only. Empty means "whatever this account type's adapter defaults to",
+    #: so a bedrock or vertex account is not silently pointed at api.anthropic.com.
+    base_url: str = ""
     priority: float = 0.0
     cost_tier: float = 1.0
     models: List[str] = field(default_factory=lambda: ["*"])
@@ -52,6 +54,9 @@ class AccountConfig:
     spend_cap_usd: Optional[float] = None
     enabled: bool = True
     headers: Dict[str, str] = field(default_factory=dict)
+    #: Provider-specific settings — region, project, model_map, and so on. Kept
+    #: untyped so a new adapter needs no change to the config schema.
+    options: Dict[str, Any] = field(default_factory=dict)
 
     def supports_model(self, model: str) -> bool:
         for pattern in self.models:

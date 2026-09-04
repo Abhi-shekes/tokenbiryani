@@ -18,6 +18,12 @@ claude                            # Claude Code now runs through the pool
 No client changes. The gateway speaks the Messages API verbatim — it swaps the auth
 header and picks an upstream, and touches nothing else in the request.
 
+> The one exception is the Bedrock and Vertex adapters. Those platforms address the
+> model in the URL and stamp their own `anthropic_version`, so exactly two fields are
+> translated, in one file (`providers/translate.py`), and nowhere else. Everything else
+> the caller sent — including parameters this gateway has never heard of — travels
+> through untouched.
+
 ---
 
 ## Why not just use a generic proxy
@@ -161,6 +167,36 @@ it polls, bounded by that request's own wait budget. A batch that outlives the b
 silently abandoned. If submission fails the request falls back to the normal queue — the
 spill lane is an optimisation, never a dependency. Streaming requests never spill.
 
+### Account types
+
+| `type` | Notes |
+|---|---|
+| `anthropic_api` | Anthropic API keys. The default. |
+| `bedrock` | AWS Bedrock. SigV4-signed; its binary event-stream is decoded back to SSE so the rest of the gateway sees ordinary streaming. Needs `pip install "tokenbiryani[bedrock]"`. |
+| `vertex` | Google Vertex AI. Bearer token from application-default credentials; returns real SSE already. Needs `pip install "tokenbiryani[vertex]"`. |
+
+All three sit in one pool, so a request can fail over from an API key to Bedrock. Use
+`options.model_map` to translate your callers' model names into each platform's ids.
+
+```yaml
+accounts:
+  - id: acct-01
+    type: anthropic_api
+    api_key: ${ANTHROPIC_API_KEY}
+  - id: acct-bedrock
+    type: bedrock
+    cost_tier: 1.2
+    options:
+      region: us-east-1
+      model_map:
+        claude-test-1: anthropic.claude-3-5-sonnet-20241022-v2:0
+  - id: acct-vertex
+    type: vertex
+    options:
+      project: my-project
+      region: us-central1
+```
+
 ### Request headers
 
 | Header | |
@@ -226,8 +262,9 @@ priority queue, virtual keys with model/pool/rpm/spend scoping, Prometheus metri
 structured logs, config hot reload, the admin API, and the CLI. Request priority with a
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
 and windowed spend, a Redis store for multi-instance deployments, and runtime key
-management behind an admin boundary. 161 tests, plus an end-to-end smoke test over real
-sockets (`scripts/smoke.sh`).
+management behind an admin boundary, plus Bedrock and Vertex adapters and pluggable
+routing strategies. 182 tests, plus an end-to-end smoke test over real sockets
+(`scripts/smoke.sh`).
 
 Not built yet: the web console, the Redis state store for multi-instance, Bedrock and
 Vertex adapters, and the Message Batches spill lane. See `PLAN.md` for the roadmap and

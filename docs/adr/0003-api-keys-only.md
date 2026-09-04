@@ -23,6 +23,7 @@ adapter in this repository.
 ## Consequences
 
 - The routing differentiators work as designed for every shipped credential type.
-- Bedrock and Vertex are the natural next adapters and cost nothing architecturally.
+- Bedrock and Vertex shipped as adapters against the same interface, which is the
+  evidence that the interface was the right seam.
 - Anyone who wants subscription pooling can implement one interface; that is their call
   and their risk, not the project's.

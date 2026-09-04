@@ -779,7 +779,7 @@ class Gateway:
                         account.mirror.update_from_headers(dict(response.headers), time.time())
                         buffered: List[bytes] = []
                         grace = started + self.config.retry.first_token_grace_seconds
-                        async for chunk in response.aiter_bytes():
+                        async for chunk in upstream.iter_sse(response):
                             collector.feed(chunk)
                             if not committed:
                                 buffered.append(chunk)

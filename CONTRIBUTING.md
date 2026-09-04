@@ -47,7 +47,9 @@ Both live behind clean interfaces with the mock available to test against:
   a `terms()` method (computes its own). A plugin that fails to import is logged and
   skipped, never fatal.
 - **A provider adapter.** Implement `providers.base.Upstream` — `url`, `auth_headers`,
-  and optionally override `send`/`open_stream`. Bedrock and Vertex are open.
+  and optionally override `send`/`open_stream`, plus `iter_sse` if the platform does
+  not stream SSE natively. `providers/bedrock.py` is the awkward case worth reading:
+  SigV4 per request and a binary event-stream decoded back to SSE.
 
 ## House rules
 

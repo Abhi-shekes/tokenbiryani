@@ -8,13 +8,14 @@ from ..config import AccountConfig
 from .base import Upstream
 
 ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_BASE_URL = "https://api.anthropic.com"
 
 
 class AnthropicUpstream(Upstream):
     def __init__(self, config: AccountConfig) -> None:
         super().__init__(config.id)
         self.config = config
-        self.base_url = config.base_url.rstrip("/")
+        self.base_url = (config.base_url or DEFAULT_BASE_URL).rstrip("/")
 
     def url(self, path: str) -> str:
         return self.base_url + "/" + path.lstrip("/")
@@ -40,8 +41,15 @@ class AnthropicUpstream(Upstream):
 def build_upstream(config: AccountConfig) -> Upstream:
     if config.type in ("anthropic_api", "anthropic"):
         return AnthropicUpstream(config)
+    if config.type == "bedrock":
+        from .bedrock import BedrockUpstream
+
+        return BedrockUpstream(config)
+    if config.type == "vertex":
+        from .vertex import VertexUpstream
+
+        return VertexUpstream(config)
     raise ValueError(
-        f"unsupported account type {config.type!r}. Shipped: anthropic_api. "
-        "Bedrock and Vertex adapters are M7; implement providers.base.Upstream to add one."
-        
+        f"unsupported account type {config.type!r}; known: anthropic_api, bedrock, "
+        "vertex. Implement providers.base.Upstream to add another."
     )

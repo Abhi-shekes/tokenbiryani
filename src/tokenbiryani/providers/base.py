@@ -146,6 +146,15 @@ class Upstream(abc.ABC):
             client, "/v1/messages/batches/" + batch_id + "/cancel", {}, client_headers
         )
 
+    def iter_sse(self, response: httpx.Response):
+        """Yield the response as Anthropic SSE bytes.
+
+        The default is a straight passthrough, because that is what the request
+        already is. Bedrock is the exception: it frames its stream in AWS
+        event-stream binary, so its adapter re-emits SSE here.
+        """
+        return response.aiter_bytes()
+
     def open_stream(
         self,
         client: httpx.AsyncClient,
