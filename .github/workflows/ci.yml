@@ -3,6 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -19,7 +20,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: ruff check .
-      - run: pytest -q
+      # The type check targets 3.8 regardless of the runner, so once is enough.
+      - if: matrix.python-version == '3.12'
+        run: mypy
+      - run: pytest -q --cov=tokenbiryani --cov-report=term-missing --cov-fail-under=80
 
   redis:
     runs-on: ubuntu-latest
@@ -51,3 +55,74 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: bash scripts/smoke.sh
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: tokenbiryani:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Prove the image boots and serves, not just that it builds.
+      - name: Run the image
+        run: |
+          cat > ci.yaml <<'YAML'
+          server: {host: 0.0.0.0, port: 8787, allow_remote: true}
+          accounts:
+            - {id: acct-01, type: anthropic_api, api_key: unused, base_url: "http://127.0.0.1:1"}
+          keys:
+            - {key: bir_ci_key_0123456789abcdef, name: ci, admin: true}
+          YAML
+          cid=$(docker run -d -p 8787:8787 \
+            -v "$PWD/ci.yaml:/app/tokenbiryani.yaml:ro" tokenbiryani:ci)
+          for _ in $(seq 40); do
+            curl -sf -o /dev/null http://127.0.0.1:8787/healthz && break || sleep 0.5
+          done
+          curl -sf http://127.0.0.1:8787/healthz
+          curl -sf http://127.0.0.1:8787/console | grep -q "tokenbiryani console"
+          test "$(docker exec "$cid" id -un)" = tokenbiryani
+          docker rm -f "$cid"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, redis, smoke, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write        # PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

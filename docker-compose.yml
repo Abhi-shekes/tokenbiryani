@@ -1,0 +1,39 @@
+# One-command path:
+#
+#   export ANTHROPIC_API_KEY=sk-ant-...
+#   export TOKENBIRYANI_KEY=$(docker compose run --rm --no-deps gateway keygen)
+#   docker compose up
+#
+#   export ANTHROPIC_BASE_URL=http://localhost:8787
+#   export ANTHROPIC_AUTH_TOKEN=$TOKENBIRYANI_KEY
+
+services:
+  gateway:
+    build: .
+    image: tokenbiryani:local
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./docker/tokenbiryani.yaml:/app/tokenbiryani.yaml:ro
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
+      TOKENBIRYANI_KEY: ${TOKENBIRYANI_KEY:?run `docker compose run --rm --no-deps gateway keygen`}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  redis-data:

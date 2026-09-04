@@ -126,6 +126,22 @@ point is retried silently on another account. A failure **after** it arrives as 
 
 ---
 
+## Docker
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export TOKENBIRYANI_KEY=$(docker compose run --rm --no-deps gateway keygen)
+docker compose up
+```
+
+Brings up the gateway on `:8787` with Redis behind it for shared state. The image runs
+as a non-root user and carries a healthcheck wired to `/healthz`, which reports
+unhealthy exactly when no account is ready.
+
+Binding `0.0.0.0` is the point of a container, so `docker/tokenbiryani.yaml` sets
+`server.allow_remote: true` and defines a key. Without both, the gateway refuses to
+start rather than expose your credentials to the network.
+
 ## Operating it
 
 Open **`http://localhost:8787/console`** for the pool, the capacity horizon, a live

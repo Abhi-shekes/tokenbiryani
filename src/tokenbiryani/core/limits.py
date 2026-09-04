@@ -93,10 +93,12 @@ class LimitWindow:
 
     def available(self, reserved: int, now: float) -> Optional[int]:
         """Projected budget: what the mirror says, minus what is already leased."""
-        if not self.known:
+        if self.remaining is None:
             return None
-        base = self.limit if (self.refilled(now) and self.limit is not None) else self.remaining
-        return max(0, int(base) - reserved)
+        base = self.remaining
+        if self.refilled(now) and self.limit is not None:
+            base = self.limit
+        return max(0, base - reserved)
 
     def fraction(self, reserved: int, now: float) -> float:
         """0..1 headroom. Unknown windows read as full — optimistic on first contact."""
@@ -166,9 +168,13 @@ class LimitMirror:
                 lowered.get(f"anthropic-ratelimit-{prefix}-reset"),
             )
 
-        self.requests.update(*triple("requests"), now=now)
-        self.input_tokens.update(*triple("input-tokens"), now=now)
-        self.output_tokens.update(*triple("output-tokens"), now=now)
+        for window, prefix in (
+            (self.requests, "requests"),
+            (self.input_tokens, "input-tokens"),
+            (self.output_tokens, "output-tokens"),
+        ):
+            limit, remaining, reset = triple(prefix)
+            window.update(limit, remaining, reset, now)
 
     def reserve(self, estimate: TokenEstimate, account_id: str) -> Lease:
         lease = Lease(
@@ -207,9 +213,11 @@ class LimitMirror:
             (self.input_tokens, actual_input),
             (self.output_tokens, actual_output),
         ):
-            if actual is not None and window.known and window.updated_at is not None:
-                if window.updated_at < now:
-                    window.remaining = max(0, int(window.remaining) - int(actual))
+            current = window.remaining
+            if actual is None or current is None or window.updated_at is None:
+                continue
+            if window.updated_at < now:
+                window.remaining = max(0, current - int(actual))
 
     def can_serve(self, estimate: TokenEstimate, now: float) -> bool:
         checks = (
@@ -242,26 +250,23 @@ class LimitMirror:
         )
 
     def next_reset(self, now: float) -> Optional[float]:
-        candidates = [
-            w.seconds_to_reset(now)
-            for w in (self.requests, self.input_tokens, self.output_tokens)
-            if w.seconds_to_reset(now) is not None
-        ]
+        candidates = []
+        for window in (self.requests, self.input_tokens, self.output_tokens):
+            seconds = window.seconds_to_reset(now)
+            if seconds is not None:
+                candidates.append(seconds)
         return min(candidates) if candidates else None
 
     def snapshot(self, now: float) -> Dict[str, Any]:
         def window(w: LimitWindow, reserved: int) -> Dict[str, Any]:
+            reset_in = w.seconds_to_reset(now)
             return {
                 "limit": w.limit,
                 "remaining": w.remaining,
                 "reserved": reserved,
                 "available": w.available(reserved, now),
                 "fraction": round(w.fraction(reserved, now), 4),
-                "reset_in": (
-                    round(w.seconds_to_reset(now), 1)
-                    if w.seconds_to_reset(now) is not None
-                    else None
-                ),
+                "reset_in": None if reset_in is None else round(reset_in, 1),
             }
 
         return {

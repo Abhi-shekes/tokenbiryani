@@ -11,7 +11,7 @@ import hmac
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from ..config import KeyConfig
 
@@ -52,7 +52,7 @@ def hash_key(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def record_from_config(key: KeyConfig, plaintext: str) -> Dict[str, object]:
+def record_from_config(key: KeyConfig, plaintext: str) -> Dict[str, Any]:
     return {
         "name": key.name,
         "key_hash": hash_key(plaintext),
@@ -67,16 +67,33 @@ def record_from_config(key: KeyConfig, plaintext: str) -> Dict[str, object]:
     }
 
 
-def config_from_record(record: Mapping[str, object]) -> KeyConfig:
+def _string_list(value: Any, default: List[str]) -> List[str]:
+    """Records come back from a store as loose JSON; coerce rather than trust."""
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return list(default)
+
+
+def _optional_number(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def config_from_record(record: Mapping[str, Any]) -> KeyConfig:
+    rpm = _optional_number(record.get("rpm"))
     return KeyConfig(
         key="",
         name=str(record.get("name") or ""),
-        models=list(record.get("models") or ["*"]),
-        pool=list(record.get("pool") or []),
-        rpm=record.get("rpm"),  # type: ignore[arg-type]
-        spend_cap_usd=record.get("spend_cap_usd"),  # type: ignore[arg-type]
+        models=_string_list(record.get("models"), ["*"]),
+        pool=_string_list(record.get("pool"), []),
+        rpm=None if rpm is None else int(rpm),
+        spend_cap_usd=_optional_number(record.get("spend_cap_usd")),
         priority=str(record.get("priority") or "interactive"),
-        max_wait_seconds=record.get("max_wait_seconds"),  # type: ignore[arg-type]
+        max_wait_seconds=_optional_number(record.get("max_wait_seconds")),
         admin=bool(record.get("admin")),
     )
 
@@ -91,13 +108,13 @@ class KeyRegistry:
 
     def __init__(self, keys: List[KeyConfig]) -> None:
         self._keys = list(keys)
-        self._managed: List[Dict[str, object]] = []
+        self._managed: List[Dict[str, Any]] = []
 
     @property
     def keys(self) -> List[KeyConfig]:
         return list(self._keys)
 
-    def set_managed(self, records: List[Dict[str, object]]) -> None:
+    def set_managed(self, records: List[Dict[str, Any]]) -> None:
         self._managed = list(records)
 
     @property
@@ -134,8 +151,8 @@ class KeyRegistry:
     def is_config_key(self, name: str) -> bool:
         return any(candidate.name == name for candidate in self._keys)
 
-    def redacted(self) -> List[Dict[str, object]]:
-        out = []
+    def redacted(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
         for key in self._keys:
             out.append(
                 {

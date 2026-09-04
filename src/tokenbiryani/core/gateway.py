@@ -769,7 +769,7 @@ class Gateway:
                 context = upstream.open_stream(self.client, path, plan.body, plan.headers)
                 response = await context.__aenter__()
                 try:
-                    status = response.status_code
+                    status = int(response.status_code)
                     if status != 200:
                         await response.aread()
                         body = _safe_json(response)
@@ -1083,11 +1083,11 @@ class Gateway:
             )
             if available is not None:
                 ready_tokens += available
-        resets = [
-            a.mirror.next_reset(now)
-            for a in self.accounts.values()
-            if a.mirror.next_reset(now) is not None
-        ]
+        resets = []
+        for account in self.accounts.values():
+            reset = account.mirror.next_reset(now)
+            if reset is not None:
+                resets.append(reset)
         return {
             "strategy": self.router.strategy,
             "accounts": accounts,

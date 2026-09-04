@@ -209,25 +209,22 @@ class AccountRuntime:
         return min(1.0, self.inflight / float(self.config.max_concurrency))
 
     def snapshot(self, now: float) -> Dict[str, Any]:
+        cooling = self.cooling_for(now)
+        p95 = self.p95_latency()
+        cache_rate = self.cache_hit_rate()
         return {
             "id": self.id,
             "type": self.config.type,
             "state": self.state(now).value,
             "disabled_reason": self.disabled_reason,
-            "cooling_for": (
-                round(self.cooling_for(now), 1) if self.cooling_for(now) is not None else None
-            ),
+            "cooling_for": None if cooling is None else round(cooling, 1),
             "inflight": self.inflight,
             "priority": self.config.priority,
             "cost_tier": self.config.cost_tier,
             "limits": self.mirror.snapshot(now),
             "error_rate": round(self.error_rate(), 4),
-            "p95_latency": (
-                round(self.p95_latency(), 3) if self.p95_latency() is not None else None
-            ),
-            "cache_hit_rate": (
-                round(self.cache_hit_rate(), 4) if self.cache_hit_rate() is not None else None
-            ),
+            "p95_latency": None if p95 is None else round(p95, 3),
+            "cache_hit_rate": None if cache_rate is None else round(cache_rate, 4),
             "requests_total": self.requests_total,
             "failures_total": self.failures_total,
             "error_kinds": dict(self.error_kinds),
