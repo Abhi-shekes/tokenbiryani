@@ -161,7 +161,12 @@ class AccountRuntime:
         self.error_kinds[classification.kind] = self.error_kinds.get(classification.kind, 0) + 1
 
     def record_success(
-        self, latency: float, usage: Usage, price: Optional[ModelPrice], now: float
+        self,
+        latency: float,
+        usage: Usage,
+        price: Optional[ModelPrice],
+        now: float,
+        cost_multiplier: float = 1.0,
     ) -> Optional[float]:
         self.breaker.record_success()
         self.outcomes.append(True)
@@ -172,6 +177,8 @@ class AccountRuntime:
         self.cache_read_total += usage.cache_read_tokens
         self.cache_creation_total += usage.cache_creation_tokens
         cost = usage.cost(price)
+        if cost is not None:
+            cost *= cost_multiplier
         if cost is not None:
             self.spend_usd += cost
         return cost

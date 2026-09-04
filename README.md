@@ -130,6 +130,15 @@ tokenbiryani status --json   # same data, for scripts
 The request inspector is the point. `filtered — cooling, 27s remaining` is a complete
 answer; "load balanced" is not.
 
+### The spill lane
+
+With `batch.enabled: true`, a `batch`-priority request that finds the pool saturated goes
+to the **Message Batches API** instead of waiting. The gateway holds the connection while
+it polls, bounded by that request's own wait budget. A batch that outlives the budget is
+**cancelled upstream** and its id returned in `x-tokenbiryani-batch-id`, so nothing is
+silently abandoned. If submission fails the request falls back to the normal queue — the
+spill lane is an optimisation, never a dependency. Streaming requests never spill.
+
 ### Request headers
 
 | Header | |

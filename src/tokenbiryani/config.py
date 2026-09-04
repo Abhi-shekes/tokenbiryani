@@ -100,6 +100,22 @@ class BreakerConfig:
 
 
 @dataclass
+class BatchConfig:
+    """Spill lane: batch-priority work can go to the Message Batches API.
+
+    Off by default. Batches are cheaper but asynchronous, so a request that spills
+    holds its connection open while the gateway polls — bounded by the request's own
+    wait budget, never longer.
+    """
+
+    enabled: bool = False
+    poll_interval_seconds: float = 2.0
+    #: Applied to the computed cost of a spilled request. Anthropic prices batch work
+    #: below standard; the exact figure is the operator's to supply, like `pricing`.
+    cost_multiplier: float = 0.5
+
+
+@dataclass
 class QueueConfig:
     max_size: int = 128
     default_max_wait_seconds: float = 60.0
@@ -168,6 +184,7 @@ class Config:
     retry: RetryConfig = field(default_factory=RetryConfig)
     breaker: BreakerConfig = field(default_factory=BreakerConfig)
     queue: QueueConfig = field(default_factory=QueueConfig)
+    batch: BatchConfig = field(default_factory=BatchConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     accounts: List[AccountConfig] = field(default_factory=list)
     keys: List[KeyConfig] = field(default_factory=list)
@@ -229,6 +246,7 @@ class Config:
             retry=build(RetryConfig, raw.get("retry")),
             breaker=build(BreakerConfig, raw.get("breaker")),
             queue=build(QueueConfig, raw.get("queue")),
+            batch=build(BatchConfig, raw.get("batch")),
             observability=build(ObservabilityConfig, raw.get("observability")),
             accounts=accounts,
             keys=keys,

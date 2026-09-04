@@ -44,6 +44,22 @@ def forwardable(headers: Mapping[str, str]) -> Dict[str, str]:
     return {k: v for k, v in headers.items() if k.lower() not in BLOCKED_REQUEST_HEADERS}
 
 
+def _as_result(response: httpx.Response, parse_json: bool = True) -> UpstreamResult:
+    body = None
+    if parse_json:
+        try:
+            parsed = response.json()
+            body = parsed if isinstance(parsed, dict) else None
+        except ValueError:
+            body = None
+    return UpstreamResult(
+        status=response.status_code,
+        headers=dict(response.headers),
+        body=body,
+        raw=response.content,
+    )
+
+
 class Upstream(abc.ABC):
     """One credential's worth of capacity."""
 
@@ -88,6 +104,46 @@ class Upstream(abc.ABC):
             headers=dict(response.headers),
             body=body,
             raw=response.content,
+        )
+
+    # ---- Message Batches ----------------------------------------------------
+    #
+    # The spill lane. Same credential, separate rate-limit pool upstream, so batch
+    # traffic does not eat the interactive budget the router is protecting.
+
+    async def submit_batch(
+        self,
+        client: httpx.AsyncClient,
+        requests: Any,
+        client_headers: Mapping[str, str],
+    ) -> UpstreamResult:
+        return await self.send(
+            client, "/v1/messages/batches", {"requests": requests}, client_headers
+        )
+
+    async def poll_batch(
+        self, client: httpx.AsyncClient, batch_id: str, client_headers: Mapping[str, str]
+    ) -> UpstreamResult:
+        response = await client.get(
+            self.url("/v1/messages/batches/" + batch_id),
+            headers=self.request_headers(client_headers),
+        )
+        return _as_result(response)
+
+    async def fetch_batch_results(
+        self, client: httpx.AsyncClient, batch_id: str, client_headers: Mapping[str, str]
+    ) -> UpstreamResult:
+        response = await client.get(
+            self.url("/v1/messages/batches/" + batch_id + "/results"),
+            headers=self.request_headers(client_headers),
+        )
+        return _as_result(response, parse_json=False)
+
+    async def cancel_batch(
+        self, client: httpx.AsyncClient, batch_id: str, client_headers: Mapping[str, str]
+    ) -> UpstreamResult:
+        return await self.send(
+            client, "/v1/messages/batches/" + batch_id + "/cancel", {}, client_headers
         )
 
     def open_stream(

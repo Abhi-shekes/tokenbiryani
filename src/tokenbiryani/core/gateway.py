@@ -29,12 +29,14 @@ from ..proxy import sse
 from ..proxy.errors import Classification, RequestAction, classify, classify_exception
 from ..store.base import StateStore
 from ..store.memory import MemoryStateStore
+from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
 from .keys import KeyRegistry
 from .limits import TokenEstimate, estimate_request
 from .queue import (
     MAX_WAIT_HEADER,
+    PRIORITY_BATCH,
     PRIORITY_HEADER,
     CapacityGate,
     QueueFull,
@@ -59,20 +61,27 @@ class GatewayError(Exception):
         message: str,
         kind: str = "api_error",
         retry_after: Optional[float] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.message = message
         self.kind = kind
         self.retry_after = retry_after
+        self.extra_headers = extra_headers or {}
 
     def payload(self) -> Dict[str, Any]:
         return {"type": "error", "error": {"type": self.kind, "message": self.message}}
 
     def headers(self) -> Dict[str, str]:
-        if self.retry_after is None:
-            return {}
-        return {"retry-after": str(int(max(1, round(self.retry_after))))}
+        headers = dict(self.extra_headers)
+        if self.retry_after is not None:
+            headers["retry-after"] = str(int(max(1, round(self.retry_after))))
+        return headers
+
+
+class _SpillToBatch(Exception):
+    """Internal: the pool is saturated and this request is allowed to spill."""
 
 
 @dataclass
@@ -251,7 +260,10 @@ class Gateway:
         last_error: Optional[GatewayError] = None
 
         while True:
-            account, decision = await self._acquire(plan)
+            try:
+                account, decision = await self._acquire(plan)
+            except _SpillToBatch:
+                return await self._spill(plan)
             result, classification, latency = await self._dispatch(account, plan, path)
             plan.event.attempts.append(
                 Attempt(
@@ -445,6 +457,9 @@ class Gateway:
                 self._fail(plan, error)
                 raise error
 
+            if self._may_spill(plan):
+                raise _SpillToBatch()
+
             remaining_wait = plan.max_wait - plan.queued_seconds
             if remaining_wait <= 0:
                 error = GatewayError(
@@ -481,6 +496,140 @@ class Gateway:
                 raise error from exc
             finally:
                 plan.queued_seconds += time.time() - waited_from
+
+    def _may_spill(self, plan: _Plan) -> bool:
+        return (
+            self.config.batch.enabled
+            and plan.priority >= PRIORITY_BATCH
+            and not plan.event.streamed
+            and not plan.spilled
+            and self._batch_account(plan) is not None
+        )
+
+    def _batch_account(self, plan: _Plan) -> Optional[AccountRuntime]:
+        """Batches have their own upstream rate-limit pool, so a messages-saturated
+        account is still a fine place to send one. Prefer the cache owner."""
+        pool = set(plan.key.pool) if plan.key.pool else None
+        candidates = [
+            account
+            for account in self.accounts.values()
+            if (pool is None or account.id in pool)
+            and account.state(time.time()) is not AccountState.DISABLED
+            and account.config.supports_model(plan.model)
+            and plan.model not in account.unsupported_models
+        ]
+        if not candidates:
+            return None
+        for account in candidates:
+            if account.id == plan.owner:
+                return account
+        return candidates[0]
+
+    async def _spill(self, plan: _Plan) -> Completion:
+        """Run a saturated batch-priority request through the Batches API."""
+        plan.spilled = True
+        account = self._batch_account(plan)
+        if account is None:
+            raise GatewayError(503, "no account can accept a batch", kind="overloaded_error")
+
+        deadline = min(
+            plan.deadline, time.time() + max(0.0, plan.max_wait - plan.queued_seconds)
+        )
+        started = time.time()
+        self.metrics.incr("tokenbiryani_batch_spills_total", account=account.id)
+        try:
+            outcome = await batch_lane.run_single(
+                self.client,
+                self.upstreams[account.id],
+                plan.body,
+                plan.headers,
+                self.config.batch.poll_interval_seconds,
+                deadline,
+            )
+        except batch_lane.BatchTimeout as exc:
+            self.metrics.incr("tokenbiryani_batch_timeouts_total", account=account.id)
+            error = GatewayError(
+                429,
+                "batch did not finish within this request's wait budget; it was "
+                "cancelled upstream",
+                kind="rate_limit_error",
+                extra_headers=(
+                    {"x-tokenbiryani-batch-id": exc.batch_id} if exc.batch_id else None
+                ),
+            )
+            self._fail(plan, error)
+            raise error from exc
+        except (batch_lane.BatchUnavailable, httpx.HTTPError) as exc:
+            # The spill lane is an optimisation, never a dependency: fall back to
+            # the normal queue rather than failing the request.
+            self.metrics.incr("tokenbiryani_batch_fallbacks_total", account=account.id)
+            logger.info("batch spill unavailable, falling back to queue: %s", exc)
+            plan.event.attempts.append(
+                Attempt(account_id=account.id, kind="batch_unavailable", detail=str(exc)[:200])
+            )
+            return await self._resume_after_spill(plan)
+
+        latency = time.time() - started
+        usage = Usage.from_body(outcome.message)
+        plan.event.via = "batch"
+        plan.event.batch_id = outcome.batch_id
+        plan.event.attempts.append(
+            Attempt(
+                account_id=account.id,
+                status=200,
+                kind="batch",
+                latency=round(latency, 4),
+                detail=f"{outcome.polls} polls",
+            )
+        )
+        decision = Decision(account, [], "batch_spill")
+        await self._settle(
+            account, plan, decision, usage, latency, 200,
+            cost_multiplier=self.config.batch.cost_multiplier,
+        )
+        return Completion(
+            status=200,
+            headers={
+                "content-type": "application/json",
+                "x-tokenbiryani-account": account.id,
+                "x-tokenbiryani-via": "batch",
+                "x-tokenbiryani-batch-id": outcome.batch_id,
+            },
+            content=json.dumps(outcome.message).encode("utf-8"),
+            event=plan.event,
+        )
+
+    async def _resume_after_spill(self, plan: _Plan) -> Completion:
+        """Re-enter the normal path once, with spilling disabled for this request."""
+        account, decision = await self._acquire(plan)
+        result, classification, latency = await self._dispatch(account, plan, MESSAGES_PATH)
+        plan.event.attempts.append(
+            Attempt(
+                account_id=account.id,
+                status=result.status if result else None,
+                kind=classification.kind,
+                latency=round(latency, 4),
+                detail=classification.detail[:200],
+            )
+        )
+        plan.event.decision = decision.to_dict()
+        if classification.kind == "ok" and result is not None:
+            usage = Usage.from_body(result.body)
+            await self._settle(account, plan, decision, usage, latency, result.status)
+            return Completion(
+                status=result.status,
+                headers=_response_headers(result.headers, account.id),
+                content=result.raw,
+                event=plan.event,
+            )
+        account.apply(classification, time.time(), plan.model)
+        error = GatewayError(
+            502 if result is None else result.status,
+            classification.detail or classification.kind,
+            kind=classification.kind,
+        )
+        self._fail(plan, error)
+        raise error
 
     async def _dispatch(
         self, account: AccountRuntime, plan: _Plan, path: str
@@ -663,11 +812,12 @@ class Gateway:
         usage: Usage,
         latency: float,
         status: int,
+        cost_multiplier: float = 1.0,
     ) -> None:
         """Record a success: stats, affinity, spend, and the event."""
         now = time.time()
         price = self.config.price_for(plan.model)
-        cost = account.record_success(latency, usage, price, now)
+        cost = account.record_success(latency, usage, price, now, cost_multiplier)
 
         if decision.affinity_broken:
             self.metrics.incr("tokenbiryani_cache_breaks_total", model=plan.model)
@@ -781,6 +931,9 @@ class Gateway:
         m.declare("tokenbiryani_failovers_total", "Requests that needed more than one account")
         m.declare("tokenbiryani_cache_breaks_total", "Requests routed away from their cache owner")
         m.declare("tokenbiryani_queued_total", "Requests that waited for capacity")
+        m.declare("tokenbiryani_batch_spills_total", "Requests diverted to the Batches API")
+        m.declare("tokenbiryani_batch_timeouts_total", "Spilled batches that outlived their budget")
+        m.declare("tokenbiryani_batch_fallbacks_total", "Spills that fell back to the queue")
         m.declare("tokenbiryani_tokens_total", "Tokens by account and kind")
 
         def headroom_gauge():
@@ -882,6 +1035,7 @@ class _Plan:
     deadline: float
     priority: int = 0
     max_wait: float = 60.0
+    spilled: bool = False
     queued_seconds: float = 0.0
     excluded: List[str] = None  # type: ignore[assignment]
     attempts: int = 0

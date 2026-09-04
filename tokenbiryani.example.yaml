@@ -44,6 +44,17 @@ queue:
   max_size: 128
   default_max_wait_seconds: 60
 
+batch:
+  # Spill lane. When the pool is saturated, batch-priority requests go to the Message
+  # Batches API instead of waiting. Cheaper, but asynchronous: the gateway holds the
+  # connection while it polls, bounded by that request's wait budget and never longer.
+  # A batch that outlives the budget is cancelled and its id returned in
+  # x-tokenbiryani-batch-id. Streaming requests never spill; batches do not stream.
+  enabled: false
+  poll_interval_seconds: 2
+  # Applied to computed cost for spilled work. Operator-supplied, like `pricing`.
+  cost_multiplier: 0.5
+
 observability:
   # Prompts are sensitive. Turning this on logs request bodies.
   log_bodies: false

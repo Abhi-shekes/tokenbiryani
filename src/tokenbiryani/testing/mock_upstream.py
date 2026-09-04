@@ -104,6 +104,10 @@ class MockAccount:
 
     script: Deque[Behavior] = field(default_factory=deque)
     received: List[Dict[str, Any]] = field(default_factory=list)
+    #: How many polls a submitted batch reports as in_progress before it ends.
+    batch_polls_before_ready: int = 1
+    #: Set to fail batch submission, e.g. to prove the gateway falls back to queueing.
+    batch_submit_status: int = 200
     #: set to suppress rate-limit headers, mimicking an upstream that reports nothing
     emit_limit_headers: bool = True
 
@@ -153,6 +157,7 @@ class MockAnthropic:
     def __init__(self, accounts: Optional[Dict[str, MockAccount]] = None) -> None:
         self.accounts: Dict[str, MockAccount] = accounts or {}
         self.calls: List[Dict[str, Any]] = []
+        self.batches: Dict[str, Dict[str, Any]] = {}
 
     def add(self, name: str, api_key: str, **kwargs: Any) -> MockAccount:
         account = MockAccount(api_key=api_key, **kwargs)
@@ -183,6 +188,8 @@ class MockAnthropic:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         api_key = request.headers.get("x-api-key", "")
         account = self.by_key(api_key)
+        if account is not None and "/messages/batches" in request.url.path:
+            return self._handle_batch(request, account)
         if account is None:
             return httpx.Response(
                 401,
@@ -291,6 +298,97 @@ class MockAnthropic:
             200,
             headers=account.headers(),
             json=self._message_body(behavior, body),
+        )
+
+    # ---- Message Batches -----------------------------------------------------
+
+    def _handle_batch(self, request: httpx.Request, account: MockAccount) -> httpx.Response:
+        path = request.url.path
+        tail = path.split("/messages/batches", 1)[1].strip("/")
+
+        if not tail:  # POST /v1/messages/batches
+            if account.batch_submit_status != 200:
+                return httpx.Response(
+                    account.batch_submit_status,
+                    json={
+                        "type": "error",
+                        "error": {"type": "api_error", "message": "batch submit refused"},
+                    },
+                )
+            payload = json.loads(request.content.decode("utf-8") or "{}")
+            batch_id = f"msgbatch_{len(self.batches) + 1:04d}"
+            self.batches[batch_id] = {
+                "account": account,
+                "requests": payload.get("requests") or [],
+                "polls": 0,
+                "cancelled": False,
+            }
+            self.calls.append({"key": account.api_key, "path": path, "body": payload})
+            return httpx.Response(
+                200,
+                json={
+                    "id": batch_id,
+                    "type": "message_batch",
+                    "processing_status": "in_progress",
+                },
+            )
+
+        parts = tail.split("/")
+        batch_id = parts[0]
+        state = self.batches.get(batch_id)
+        if state is None:
+            return httpx.Response(
+                404,
+                json={
+                    "type": "error",
+                    "error": {"type": "not_found_error", "message": "no such batch"},
+                },
+            )
+
+        if len(parts) > 1 and parts[1] == "cancel":
+            state["cancelled"] = True
+            return httpx.Response(
+                200, json={"id": batch_id, "processing_status": "canceling"}
+            )
+
+        if len(parts) > 1 and parts[1] == "results":
+            lines = []
+            for entry in state["requests"]:
+                behavior = Behavior(kind="ok", text="batched")
+                lines.append(
+                    json.dumps(
+                        {
+                            "custom_id": entry.get("custom_id"),
+                            "result": {
+                                "type": "succeeded",
+                                "message": self._message_body(
+                                    behavior, entry.get("params") or {}
+                                ),
+                            },
+                        }
+                    )
+                )
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/x-jsonl"},
+                content="\n".join(lines).encode("utf-8"),
+            )
+
+        state["polls"] += 1
+        if state["cancelled"]:
+            status = "canceled"
+        elif state["polls"] > state["account"].batch_polls_before_ready:
+            status = "ended"
+        else:
+            status = "in_progress"
+        return httpx.Response(
+            200,
+            json={
+                "id": batch_id,
+                "type": "message_batch",
+                "processing_status": status,
+                "results_url": f"/v1/messages/batches/{batch_id}/results",
+            },
         )
 
     def _message_body(self, behavior: Behavior, request_body: Dict[str, Any]) -> Dict[str, Any]:
