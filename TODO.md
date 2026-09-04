@@ -37,7 +37,10 @@ Smaller, and genuinely optional:
 
 ## Not built, and deliberately
 
-- **No OAuth / subscription-account adapter.** See [ADR-0003](docs/adr/0003-api-keys-only.md).
+- **No OAuth adapter in core.** One exists as a separate distribution at
+  `contrib/tokenbiryani-oauth/`, which core neither depends on nor installs. See
+  [ADR-0003](docs/adr/0003-api-keys-only.md) and that package's README, which is
+  blunt about what it costs you.
 - **Config is read-only over HTTP.** `POST /admin/reload` re-reads the file; the API
   will not write it. Keys are the exception, because they are credentials rather than
   configuration.

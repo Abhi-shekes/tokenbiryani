@@ -50,6 +50,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ever stops beating cache-blind routing.
 - End-to-end smoke test over real sockets.
 
+**Contrib**
+- `contrib/tokenbiryani-oauth`, a separate distribution adding `type: oauth` for
+  subscription sessions. Not installed by `pip install tokenbiryani`.
+
 **Project**
 - Container image (non-root, healthchecked) and `docker compose up`.
 - CI: ruff, mypy, coverage-gated tests on 3.8/3.10/3.12, a real-Redis job, an image

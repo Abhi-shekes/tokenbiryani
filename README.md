@@ -219,6 +219,7 @@ spill lane is an optimisation, never a dependency. Streaming requests never spil
 | `anthropic_api` | Anthropic API keys. The default. |
 | `bedrock` | AWS Bedrock. SigV4-signed; its binary event-stream is decoded back to SSE so the rest of the gateway sees ordinary streaming. Needs `pip install "tokenbiryani[bedrock]"`. |
 | `vertex` | Google Vertex AI. Bearer token from application-default credentials; returns real SSE already. Needs `pip install "tokenbiryani[vertex]"`. |
+| `oauth` | A Claude subscription session. Ships as a **separate** package, `contrib/tokenbiryani-oauth/` — core neither depends on it nor installs it. Read its README first: subscription sessions send no rate-limit headers, so such an account loses headroom routing, leases and the capacity horizon. |
 
 All three sit in one pool, so a request can fail over from an API key to Bedrock. Use
 `options.model_map` to translate your callers' model names into each platform's ids.

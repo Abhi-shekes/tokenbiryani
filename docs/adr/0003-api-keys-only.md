@@ -18,7 +18,14 @@ Two problems:
 
 Ship `anthropic_api` (API keys) as the supported, documented, tested path. Keep
 `providers.base.Upstream` open so other credential types *can* be implemented. No OAuth
-adapter in this repository.
+adapter in the core distribution.
+
+**Amended.** An adapter now exists at `contrib/tokenbiryani-oauth/`, as a **separate
+distribution** with its own `pyproject.toml`, LICENSE and tests. Core does not depend
+on it or reference it, and `pip install tokenbiryani` does not bring it. It plugs in
+through the `tokenbiryani.providers` entry point like any third-party adapter, and can
+be moved to its own repository with `git subtree split`. The decision above is
+unchanged: the supported path is API keys.
 
 ## Consequences
 

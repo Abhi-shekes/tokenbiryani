@@ -7,6 +7,25 @@ All types share one pool, so a request can fail over from an API key to Bedrock.
 | `anthropic_api` | `x-api-key` | native SSE | — |
 | `bedrock` | SigV4 | binary event-stream, decoded to SSE | `pip install "tokenbiryani[bedrock]"` |
 | `vertex` | bearer token | native SSE | `pip install "tokenbiryani[vertex]"` |
+| `oauth` | subscription session | native SSE | separate package — see below |
+
+## Subscription sessions
+
+`contrib/tokenbiryani-oauth/` adds `type: oauth`, backed by a Claude subscription
+session rather than an API key. It is a separate distribution: core does not depend on
+it, and `pip install tokenbiryani` does not bring it.
+
+Understand the trade before installing it. Subscription sessions send no
+`anthropic-ratelimit-*` headers, and those headers are the entire routing signal. Such
+an account keeps failover and prompt-cache affinity, and loses headroom-aware routing,
+binding leases, admission control and the capacity horizon — falling back to reactive
+429 backoff, which is what a generic proxy already does.
+
+Those accounts must be configured `observable_limits: false`, or they read as
+permanently full and starve every API-key account in the pool.
+
+There is also a terms question, and it is not the same question for one account as for
+several. The package README covers both.
 
 ## The one place bodies are rewritten
 
