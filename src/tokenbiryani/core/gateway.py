@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -26,7 +27,13 @@ from ..observability.metrics import Metrics
 from ..providers.anthropic_api import build_upstream
 from ..providers.base import BLOCKED_RESPONSE_HEADERS, Upstream
 from ..proxy import sse
-from ..proxy.errors import Classification, RequestAction, classify, classify_exception
+from ..proxy.errors import (
+    AccountAction,
+    Classification,
+    RequestAction,
+    classify,
+    classify_exception,
+)
 from ..store.base import SCOPE_ACCOUNT, SCOPE_KEY, StateStore, build_store
 from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
@@ -44,11 +51,15 @@ from .queue import (
     priority_name,
 )
 from .router import Decision, Router, RoutingContext
+from .secrets import SecretBox, SecretError
 from .session import session_key as compute_session_key
 
 MESSAGES_PATH = "/v1/messages"
 
 logger = logging.getLogger("tokenbiryani")
+
+#: Account ids appear in URLs, metric labels and log lines; keep them boring.
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 class GatewayError(Exception):
@@ -127,6 +138,11 @@ class Gateway:
             )
             self.upstreams[account_config.id] = build_upstream(account_config)
 
+        #: Accounts declared in the config file. They belong to the file: the API
+        #: can neither edit nor delete them, only accounts it created itself.
+        self._config_account_ids = {a.id for a in config.accounts}
+        self._secrets: Optional[SecretBox] = None
+
         self._client = client
         self._owns_client = client is None
         self._register_metrics()
@@ -139,6 +155,7 @@ class Gateway:
                 timeout=httpx.Timeout(self.config.server.request_timeout_seconds, connect=10.0)
             )
         await self.store.startup()
+        await self.refresh_accounts()
         await self.hydrate_spend()
         await self.refresh_keys()
 
@@ -162,12 +179,209 @@ class Gateway:
             try:
                 await self.hydrate_spend()
                 await self.refresh_keys()
+                await self.refresh_accounts()
             except Exception as exc:  # noqa: BLE001 - a store blip must not kill routing
                 logger.warning("state resync failed: %s", exc)
 
     async def refresh_keys(self) -> None:
         """Load managed keys from the store into the registry."""
         self.keys.set_managed(await self.store.list_keys())
+
+    # ---- managed accounts ----------------------------------------------------
+
+    @property
+    def secrets(self) -> SecretBox:
+        if self._secrets is None:
+            self._secrets = SecretBox(key_path=self.config.store.secret_key_path)
+        return self._secrets
+
+    def is_config_account(self, account_id: str) -> bool:
+        return account_id in self._config_account_ids
+
+    def _config_from_record(self, record: Dict[str, Any]) -> AccountConfig:
+        return AccountConfig(
+            id=str(record["id"]),
+            name=str(record.get("name") or ""),
+            type=str(record.get("type") or "anthropic_api"),
+            api_key=self.secrets.decrypt(str(record.get("api_key") or "")),
+            base_url=str(record.get("base_url") or ""),
+            priority=float(record.get("priority") or 0.0),
+            cost_tier=float(record.get("cost_tier") or 1.0),
+            models=list(record.get("models") or ["*"]),
+            max_concurrency=int(record.get("max_concurrency") or 16),
+            spend_cap_usd=record.get("spend_cap_usd"),
+            enabled=bool(record.get("enabled", True)),
+            headers=dict(record.get("headers") or {}),
+            options=dict(record.get("options") or {}),
+            observable_limits=bool(record.get("observable_limits", True)),
+            assumed_headroom=float(record.get("assumed_headroom") or 0.5),
+        )
+
+    async def refresh_accounts(self) -> None:
+        """Merge accounts stored through the API into the running pool.
+
+        Config accounts always win a name clash: the file is the operator's, and a
+        record in a shared store must not be able to redirect it.
+        """
+        records = await self.store.list_accounts()
+        seen = set()
+        for record in records:
+            account_id = str(record.get("id") or "")
+            if not account_id or account_id in self._config_account_ids:
+                continue
+            seen.add(account_id)
+            try:
+                account_config = self._config_from_record(record)
+            except SecretError as exc:
+                logger.warning("account %r is unreadable: %s", account_id, exc)
+                continue
+            existing = self.accounts.get(account_id)
+            if existing is None:
+                self.accounts[account_id] = AccountRuntime(
+                    config=account_config,
+                    mirror=_mirror_for(account_config),
+                    breaker=CircuitBreaker(
+                        failure_threshold=self.config.breaker.failure_threshold,
+                        cooldown_seconds=self.config.breaker.cooldown_seconds,
+                    ),
+                )
+                self.upstreams[account_id] = build_upstream(account_config)
+                continue
+            rotated = (
+                existing.config.api_key != account_config.api_key
+                or existing.config.base_url != account_config.base_url
+                or existing.config.type != account_config.type
+            )
+            existing.config = account_config
+            existing.mirror.observable = account_config.observable_limits
+            if rotated:
+                self.upstreams[account_id] = build_upstream(account_config)
+                existing.disabled_reason = None
+                existing.breaker.record_success()
+
+        # Anything managed that has gone from the store has been deleted elsewhere.
+        for account_id in list(self.accounts):
+            if account_id not in self._config_account_ids and account_id not in seen:
+                self.accounts.pop(account_id, None)
+                self.upstreams.pop(account_id, None)
+
+    def account_record(
+        self, account_id: str, name: str, api_key: str, **options: Any
+    ) -> Dict[str, Any]:
+        return {
+            "id": account_id,
+            "name": name or account_id,
+            "type": str(options.get("type") or "anthropic_api"),
+            "api_key": self.secrets.encrypt(api_key),
+            "base_url": str(options.get("base_url") or ""),
+            "cost_tier": float(options.get("cost_tier") or 1.0),
+            "priority": float(options.get("priority") or 0.0),
+            "models": list(options.get("models") or ["*"]),
+            "max_concurrency": int(options.get("max_concurrency") or 16),
+            "spend_cap_usd": options.get("spend_cap_usd"),
+            "enabled": bool(options.get("enabled", True)),
+            "observable_limits": bool(options.get("observable_limits", True)),
+            "options": dict(options.get("options") or {}),
+            "created_at": time.time(),
+        }
+
+    async def create_account(
+        self, account_id: str, name: str, api_key: str, **options: Any
+    ) -> Dict[str, Any]:
+        account_id = (account_id or "").strip()
+        if not account_id:
+            raise GatewayError(400, "an account needs an id", kind="invalid_request_error")
+        if not _SAFE_ID.match(account_id):
+            raise GatewayError(
+                400,
+                "an account id may contain letters, digits, dashes and underscores only",
+                kind="invalid_request_error",
+            )
+        await self.refresh_accounts()
+        if account_id in self.accounts:
+            raise GatewayError(
+                409, f"an account named {account_id!r} already exists",
+                kind="invalid_request_error",
+            )
+        if not api_key and str(options.get("type") or "anthropic_api") == "anthropic_api":
+            raise GatewayError(400, "an API key is required", kind="invalid_request_error")
+
+        record = self.account_record(account_id, name, api_key, **options)
+        await self.store.put_account(record)
+        await self.refresh_accounts()
+        return self.redacted_account(record)
+
+    async def update_account(self, account_id: str, **changes: Any) -> Dict[str, Any]:
+        if self.is_config_account(account_id):
+            raise GatewayError(
+                409,
+                f"{account_id!r} is declared in the config file; edit it there",
+                kind="invalid_request_error",
+            )
+        records = {str(r.get("id")): r for r in await self.store.list_accounts()}
+        record = records.get(account_id)
+        if record is None:
+            raise GatewayError(404, f"no managed account {account_id!r}", kind="not_found_error")
+
+        for field_name in (
+            "name", "base_url", "cost_tier", "priority", "models",
+            "max_concurrency", "spend_cap_usd", "enabled", "observable_limits",
+        ):
+            if field_name in changes and changes[field_name] is not None:
+                record[field_name] = changes[field_name]
+        if changes.get("api_key"):
+            record["api_key"] = self.secrets.encrypt(str(changes["api_key"]))
+
+        await self.store.put_account(record)
+        await self.refresh_accounts()
+        return self.redacted_account(record)
+
+    async def delete_account(self, account_id: str) -> bool:
+        if self.is_config_account(account_id):
+            raise GatewayError(
+                409,
+                f"{account_id!r} is declared in the config file; remove it there and reload",
+                kind="invalid_request_error",
+            )
+        removed = await self.store.delete_account(account_id)
+        await self.refresh_accounts()
+        return removed
+
+    async def test_account(self, account_id: str) -> Dict[str, Any]:
+        """Prove a credential works, before anyone routes real traffic to it."""
+        account = self.accounts.get(account_id)
+        if account is None:
+            raise GatewayError(404, f"no account {account_id!r}", kind="not_found_error")
+        upstream = self.upstreams[account_id]
+        started = time.time()
+        try:
+            response = await self.client.get(
+                upstream.url("/v1/models"), headers=upstream.request_headers({}), timeout=15.0
+            )
+        except Exception as exc:  # noqa: BLE001 - the reason is the whole answer
+            return {
+                "ok": False, "status": None,
+                "detail": f"{type(exc).__name__}: {exc}",
+                "latency": round(time.time() - started, 3),
+            }
+        latency = round(time.time() - started, 3)
+        account.mirror.update_from_headers(dict(response.headers), time.time())
+        if response.status_code < 300:
+            return {"ok": True, "status": response.status_code, "latency": latency,
+                    "detail": "credential accepted"}
+        classification = classify(
+            response.status_code, dict(response.headers), _safe_json(response)
+        )
+        if classification.account_action is AccountAction.DISABLE:
+            account.disabled_reason = classification.kind
+        return {"ok": False, "status": response.status_code, "latency": latency,
+                "detail": classification.detail or classification.kind}
+
+    def redacted_account(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        out = {k: v for k, v in record.items() if k != "api_key"}
+        out["source"] = "managed"
+        out["has_credential"] = bool(record.get("api_key"))
+        return out
 
     async def create_key(self, name: str, **options: Any) -> Tuple[str, Dict[str, Any]]:
         """Mint a managed key. The plaintext is returned once and never stored."""
@@ -259,10 +473,16 @@ class Gateway:
                 existing.disabled_reason = None
                 existing.breaker.record_success()
 
-        removed = [account_id for account_id in before if account_id not in after]
+        # Only config accounts are governed by the file; managed ones live in the
+        # store and must survive a reload of it.
+        removed = [
+            account_id for account_id in before
+            if account_id not in after and account_id in self._config_account_ids
+        ]
         for account_id in removed:
             self.accounts.pop(account_id, None)
             self.upstreams.pop(account_id, None)
+        self._config_account_ids = set(after)
 
         managed = list(self.keys._managed)  # noqa: SLF001 - same object's own state
         self.config = config
@@ -1079,7 +1299,12 @@ class Gateway:
 
     def snapshot(self) -> Dict[str, Any]:
         now = time.time()
-        accounts = [a.snapshot(now) for a in self.accounts.values()]
+        accounts = []
+        for runtime in self.accounts.values():
+            entry = runtime.snapshot(now)
+            entry["source"] = "config" if self.is_config_account(runtime.id) else "managed"
+            entry["name"] = getattr(runtime.config, "name", None) or runtime.id
+            accounts.append(entry)
         ready = [
             a
             for a in self.accounts.values()

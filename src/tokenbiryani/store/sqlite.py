@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS managed_keys (
     record  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS managed_accounts (
+    id      TEXT PRIMARY KEY,
+    record  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS key_requests (
     key_name TEXT NOT NULL,
     at       REAL NOT NULL
@@ -195,6 +200,32 @@ class SqliteStateStore(StateStore):
     async def list_keys(self) -> List[Dict[str, Any]]:
         def query(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
             rows = conn.execute("SELECT record FROM managed_keys").fetchall()
+            return [json.loads(row[0]) for row in rows]
+
+        return await self._run(query)
+
+    async def put_account(self, record: Dict[str, Any]) -> None:
+        def write(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                "INSERT INTO managed_accounts (id, record) VALUES (?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET record = excluded.record",
+                (str(record["id"]), json.dumps(record)),
+            )
+            conn.commit()
+
+        await self._run(write)
+
+    async def delete_account(self, account_id: str) -> bool:
+        def write(conn: sqlite3.Connection) -> bool:
+            cursor = conn.execute("DELETE FROM managed_accounts WHERE id = ?", (account_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+        return await self._run(write)
+
+    async def list_accounts(self) -> List[Dict[str, Any]]:
+        def query(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+            rows = conn.execute("SELECT record FROM managed_accounts ORDER BY id").fetchall()
             return [json.loads(row[0]) for row in rows]
 
         return await self._run(query)

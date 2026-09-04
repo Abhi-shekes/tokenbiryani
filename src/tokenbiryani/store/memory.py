@@ -16,6 +16,7 @@ class MemoryStateStore(StateStore):
         self._requests: Dict[str, Deque[float]] = defaultdict(deque)
         self._ledger: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
         self._keys: Dict[str, Dict[str, object]] = {}
+        self._accounts: Dict[str, Dict[str, object]] = {}
         self._lock = asyncio.Lock()
 
     async def get_affinity(self, session_key: str) -> Optional[str]:
@@ -74,6 +75,18 @@ class MemoryStateStore(StateStore):
     async def list_keys(self) -> List[Dict[str, object]]:
         async with self._lock:
             return [dict(record) for record in self._keys.values()]
+
+    async def put_account(self, record: Dict[str, object]) -> None:
+        async with self._lock:
+            self._accounts[str(record["id"])] = dict(record)
+
+    async def delete_account(self, account_id: str) -> bool:
+        async with self._lock:
+            return self._accounts.pop(account_id, None) is not None
+
+    async def list_accounts(self) -> List[Dict[str, object]]:
+        async with self._lock:
+            return [dict(record) for record in self._accounts.values()]
 
     def _sum(self, key: str, window_seconds: float) -> float:
         cutoff = time.time() - window_seconds

@@ -60,6 +60,18 @@ class StateStore(abc.ABC):
     async def list_keys(self) -> List[Dict[str, object]]:
         ...
 
+    @abc.abstractmethod
+    async def put_account(self, record: Dict[str, object]) -> None:
+        """Store an account added through the API. Credentials arrive encrypted."""
+
+    @abc.abstractmethod
+    async def delete_account(self, account_id: str) -> bool:
+        ...
+
+    @abc.abstractmethod
+    async def list_accounts(self) -> List[Dict[str, object]]:
+        ...
+
     async def startup(self) -> None:
         return None
 

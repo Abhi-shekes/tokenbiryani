@@ -61,6 +61,9 @@ store:
   # redis   — shared between instances
   backend: memory
   path: tokenbiryani.db
+  # Encryption key for credentials added through the API. Created 0600 on first use.
+  # Overridden by TOKENBIRYANI_SECRET_KEY, which is what containers should set.
+  secret_key_path: tokenbiryani.key
   url: redis://127.0.0.1:6379/0
   namespace: tokenbiryani
 
@@ -74,8 +77,12 @@ observability:
   log_bodies: false
   event_buffer: 500
 
+# Accounts can also be added at runtime through the console or POST /admin/accounts.
+# Those are stored encrypted in the state store; these are governed by this file and
+# the API will not edit or delete them.
 accounts:
   - id: acct-01
+    name: Primary
     type: anthropic_api
     api_key: ${ANTHROPIC_API_KEY}
     # base_url is an override; omit it to use the adapter's own default.

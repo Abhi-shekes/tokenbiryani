@@ -195,6 +195,51 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         payload["recent_requests"] = gateway.events.recent_for(account_id, 25)
         return JSONResponse(payload)
 
+    @app.get("/admin/accounts")
+    async def list_accounts(request: Request) -> JSONResponse:
+        authenticate_admin(request)
+        gateway: Gateway = app.state.gateway
+        await gateway.refresh_accounts()
+        return JSONResponse(gateway.snapshot())
+
+    @app.post("/admin/accounts")
+    async def create_account(request: Request) -> JSONResponse:
+        authenticate_admin(request)
+        payload = await read_body(request)
+        record = await app.state.gateway.create_account(
+            str(payload.get("id") or ""),
+            str(payload.get("name") or ""),
+            str(payload.get("api_key") or ""),
+            type=payload.get("type"),
+            base_url=payload.get("base_url"),
+            cost_tier=payload.get("cost_tier"),
+            priority=payload.get("priority"),
+            models=payload.get("models"),
+            spend_cap_usd=payload.get("spend_cap_usd"),
+            observable_limits=payload.get("observable_limits", True),
+            options=payload.get("options"),
+        )
+        return JSONResponse(record, status_code=201)
+
+    @app.patch("/admin/accounts/{account_id}")
+    async def update_account(request: Request, account_id: str) -> JSONResponse:
+        authenticate_admin(request)
+        payload = await read_body(request)
+        return JSONResponse(await app.state.gateway.update_account(account_id, **payload))
+
+    @app.delete("/admin/accounts/{account_id}")
+    async def delete_account(request: Request, account_id: str) -> JSONResponse:
+        authenticate_admin(request)
+        removed = await app.state.gateway.delete_account(account_id)
+        if not removed:
+            return _error(404, f"no managed account named {account_id!r}", "not_found_error")
+        return JSONResponse({"deleted": account_id})
+
+    @app.post("/admin/accounts/{account_id}/test")
+    async def test_account(request: Request, account_id: str) -> JSONResponse:
+        authenticate_admin(request)
+        return JSONResponse(await app.state.gateway.test_account(account_id))
+
     @app.post("/admin/reload")
     async def reload(request: Request) -> JSONResponse:
         authenticate_admin(request)

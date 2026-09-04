@@ -128,6 +128,22 @@ class RedisStateStore(StateStore):
                 continue
         return records
 
+    async def put_account(self, record: Dict[str, Any]) -> None:
+        await self.client.hset(self._key("accounts"), str(record["id"]), json.dumps(record))
+
+    async def delete_account(self, account_id: str) -> bool:
+        return bool(await self.client.hdel(self._key("accounts"), account_id))
+
+    async def list_accounts(self) -> List[Dict[str, Any]]:
+        raw = await self.client.hgetall(self._key("accounts"))
+        records = []
+        for value in (raw or {}).values():
+            try:
+                records.append(json.loads(value))
+            except ValueError:
+                continue
+        return sorted(records, key=lambda r: str(r.get("id", "")))
+
     async def spend_by_scope(self, scope: str, window_seconds: float) -> Dict[str, float]:
         names = await self.client.smembers(self._key("spend-names", scope))
         totals: Dict[str, float] = {}

@@ -42,6 +42,8 @@ def interpolate(value: Any) -> Any:
 @dataclass
 class AccountConfig:
     id: str
+    #: A label for humans. The id stays the stable handle used in logs and metrics.
+    name: str = ""
     type: str = "anthropic_api"
     api_key: str = ""
     #: Override only. Empty means "whatever this account type's adapter defaults to",
@@ -196,6 +198,9 @@ class StoreConfig:
 
     backend: str = "memory"
     path: str = "tokenbiryani.db"
+    #: Where the encryption key for stored credentials lives. Overridden by the
+    #: TOKENBIRYANI_SECRET_KEY environment variable, which containers should use.
+    secret_key_path: str = "tokenbiryani.key"
     url: str = "redis://127.0.0.1:6379/0"
     namespace: str = "tokenbiryani"
 
