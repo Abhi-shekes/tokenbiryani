@@ -295,8 +295,9 @@ structured logs, config hot reload, the admin API, and the CLI. Request priority
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
 and windowed spend, a Redis store for multi-instance deployments, and runtime key
 management behind an admin boundary, plus Bedrock and Vertex adapters and pluggable
-routing strategies, and the operator console. 196 tests, a reproducible benchmark, and
-an end-to-end smoke test over real sockets (`scripts/smoke.sh`).
+routing strategies, and the operator console. 204 tests including a lease-concurrency
+suite, a reproducible benchmark, and an end-to-end smoke test over real sockets
+(`scripts/smoke.sh`).
 
 All eight milestones in `PLAN.md` are built. `docs/UI-DESIGN.md` is the console's design
 brief, and the console follows it.

@@ -35,6 +35,14 @@ python -m tokenbiryani.testing.server --port 9911 --accounts key-a,key-b
 routing. A change to the router that improves throughput while quietly costing cache
 hits is a regression here, which is the point.
 
+## Concurrency
+
+`tests/test_concurrency.py` is the only place overlapping requests are exercised, and
+leases are the mechanism it guards: without an atomic reservation, simultaneous
+requests all read the same "plenty of headroom" and stampede one account into a 429.
+`mock.latency` forces real overlap, and one test exists purely to prove the others
+actually overlapped — a concurrency test that silently serialises proves nothing.
+
 ## State stores
 
 `memory`, `sqlite` and `redis` are held to identical behaviour by one parametrised

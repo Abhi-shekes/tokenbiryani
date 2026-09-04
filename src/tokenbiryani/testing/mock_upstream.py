@@ -203,6 +203,9 @@ class MockAnthropic:
         self.accounts: Dict[str, MockAccount] = accounts or {}
         self.calls: List[Dict[str, Any]] = []
         self.batches: Dict[str, Dict[str, Any]] = {}
+        #: Delay every response. Without this an in-process mock answers before the
+        #: next request starts, and nothing concurrent ever actually overlaps.
+        self.latency: float = 0.0
 
     def add(self, name: str, api_key: str, **kwargs: Any) -> MockAccount:
         account = MockAccount(api_key=api_key, **kwargs)
@@ -219,7 +222,15 @@ class MockAnthropic:
         self.accounts[name].script.extend(behaviors)
 
     def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self._handle)
+        # Always async, and latency is read per request: a transport built before a
+        # test sets `latency` must still honour it. (Sync httpx clients are not
+        # supported against this mock, which nothing needs.)
+        async def handle(request: httpx.Request) -> httpx.Response:
+            if self.latency > 0:
+                await asyncio.sleep(self.latency)
+            return self._handle(request)
+
+        return httpx.MockTransport(handle)
 
     def client(self, **kwargs: Any) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=self.transport(), **kwargs)
