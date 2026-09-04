@@ -155,3 +155,59 @@ def test_doctor_reports_an_http_error_instead_of_a_traceback(monkeypatch, capsys
     args, cli = run_doctor(monkeypatch, {}, status_code=401)
     assert cli.cmd_doctor(args) == 1
     assert "401" in capsys.readouterr().out
+
+
+def test_serve_no_longer_refuses_an_empty_pool(tmp_path, monkeypatch, capsys):
+    """An empty pool is a first run, not an error — the console is where you fix it.
+
+    It used to exit 1, which left nowhere to add the first account from.
+    """
+    import tokenbiryani.cli as cli
+
+    config = tmp_path / "tokenbiryani.yaml"
+    config.write_text(
+        "server: {host: 127.0.0.1, port: 8787}\n"
+        "keys:\n  - {key: bir_empty_pool_test_000000, name: d, admin: true}\n"
+    )
+
+    served = {}
+    monkeypatch.setitem(
+        __import__("sys").modules, "uvicorn",
+        type("uvicorn", (), {"run": staticmethod(lambda *a, **k: served.update(k))})(),
+    )
+    args = build_parser().parse_args(["-c", str(config), "serve"])
+    assert cli.cmd_serve(args) == 0, "an empty pool must not be fatal"
+    assert "add one at" in capsys.readouterr().err
+    assert served, "the server still started"
+
+
+def test_the_asgi_factory_builds_an_app_from_the_environment(tmp_path, monkeypatch):
+    """uvicorn's reloader re-imports in a fresh process, so it needs this path."""
+    from tokenbiryani.api.asgi import CONFIG_ENV, create
+
+    config = tmp_path / "tokenbiryani.yaml"
+    config.write_text(
+        "server: {host: 127.0.0.1, port: 8787}\n"
+        "accounts:\n  - {id: a, type: anthropic_api, api_key: k}\n"
+        "keys:\n  - {key: bir_asgi_factory_test_00000, name: d, admin: true}\n"
+    )
+    monkeypatch.setenv(CONFIG_ENV, str(config))
+    app = create()
+    assert app.state.config.accounts[0].id == "a"
+
+
+def test_keygen_mints_two_different_kinds_of_key(capsys):
+    """Confusing them is easy and expensive, so they come from one command."""
+    import tokenbiryani.cli as cli
+
+    assert cli.cmd_keygen(build_parser().parse_args(["keygen"])) == 0
+    virtual = capsys.readouterr().out.strip()
+    assert virtual.startswith("bir_")
+
+    assert cli.cmd_keygen(build_parser().parse_args(["keygen", "--secret"])) == 0
+    secret = capsys.readouterr().out.strip()
+    assert not secret.startswith("bir_")
+    # A Fernet key, which is what TOKENBIRYANI_SECRET_KEY has to be.
+    from cryptography.fernet import Fernet
+
+    Fernet(secret.encode())

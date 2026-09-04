@@ -124,8 +124,37 @@ jobs:
           done
           curl -sf http://127.0.0.1:8787/healthz
           curl -sf http://127.0.0.1:8787/console | grep -q "tokenbiryani console"
+          # The console is a page plus a stylesheet now. A missing stylesheet still
+          # serves a 200 page, so check the asset itself.
+          curl -sf http://127.0.0.1:8787/console.css | grep -q -- "--ready:"
+          # Adding an account needs cryptography and a writable key path, and the
+          # image had neither. Nothing above this line would have caught that.
+          curl -sf -X POST http://127.0.0.1:8787/admin/accounts \
+            -H "x-api-key: bir_ci_key_0123456789abcdef" \
+            -H "content-type: application/json" \
+            -d '{"id":"ci-added","name":"Added in CI","api_key":"sk-ant-unused"}' \
+            | grep -q '"name": *"Added in CI"'
+          curl -sf "http://127.0.0.1:8787/admin/usage?window=1h" \
+            -H "x-api-key: bir_ci_key_0123456789abcdef" | grep -q '"buckets"'
           test "$(docker exec "$cid" id -un)" = tokenbiryani
           docker rm -f "$cid"
+
+      # The dev target is what docker-compose.yml builds, so a break in it breaks
+      # every contributor's stack while the released image stays green.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dev
+          load: true
+          tags: tokenbiryani:ci-dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: The whole stack comes up from one file
+        run: |
+          docker compose up -d --wait
+          curl -sf http://127.0.0.1:8787/healthz | grep -q '"ready": *3'
+          curl -sf http://127.0.0.1:8787/console.css > /dev/null
+          docker compose down -v
 
   publish-docs:
     if: startsWith(github.ref, 'refs/tags/v')

@@ -1,26 +1,89 @@
-# One-command path:
+# The whole stack, up and down, from this one file.
 #
-#   export ANTHROPIC_API_KEY=sk-ant-...
-#   export TOKENBIRYANI_KEY=$(docker compose run --rm --no-deps gateway keygen)
-#   docker compose up
+#   docker compose up -d        gateway + Redis + a mock Anthropic
+#   docker compose logs -f      follow it
+#   docker compose down         stop it
+#   docker compose down -v      stop it and forget the stored accounts too
 #
-#   export ANTHROPIC_BASE_URL=http://localhost:8787
-#   export ANTHROPIC_AUTH_TOKEN=$TOKENBIRYANI_KEY
+# Then open http://localhost:8787/console and add your accounts there. Nothing
+# needs to be set first: the stack boots against the bundled mock upstream, so it
+# comes up green and costs nothing.
+#
+# Editing anything under ./src restarts the gateway in place — the source is
+# bind-mounted and uvicorn watches it. The console's HTML and CSS are read per
+# request, so a browser refresh is enough for those.
+#
+# ---------------------------------------------------------------------------
+# Going real
+#
+#   1. Add an account from the console, or set ANTHROPIC_API_KEY and uncomment
+#      the account in docker/tokenbiryani.yaml.
+#   2. Set your own keys — the defaults below are development values, published
+#      in a public repository, and must not survive contact with production:
+#
+#        cp .env.example .env        # then edit it
+#        docker compose run --rm --no-deps gateway keygen           # TOKENBIRYANI_KEY
+#        docker compose run --rm --no-deps gateway keygen --secret  # TOKENBIRYANI_SECRET_KEY
+#
+#      TOKENBIRYANI_KEY is what your clients authenticate with. TOKENBIRYANI_SECRET_KEY
+#      encrypts stored account credentials before they reach Redis — keep it, or the
+#      accounts you added become unrecoverable on the next `up`.
+# ---------------------------------------------------------------------------
 
 services:
   gateway:
-    build: .
-    image: tokenbiryani:local
+    build:
+      context: .
+      target: dev
+    image: tokenbiryani:dev
+    # Loopback only. The container binds 0.0.0.0 because that is what containers do;
+    # publishing it to 0.0.0.0 as well would put a credential holder on your LAN.
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     volumes:
-      - ./docker/tokenbiryani.yaml:/app/tokenbiryani.yaml:ro
+      # The source, so a save on the host restarts the gateway in the container.
+      - ./src:/app/src
+      # Read-write on purpose: the gateway re-reads this file when its mtime changes,
+      # so edits land without a restart.
+      - ./docker/tokenbiryani.yaml:/app/tokenbiryani.yaml
+      # So `docker compose exec gateway pytest -q` runs the host's tests against
+      # the running stack. Neither is copied into the image.
+      - ./tests:/app/tests:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      # Anything the gateway writes for itself — the fallback encryption key, and a
+      # SQLite file if you switch the store backend.
+      - gateway-state:/state
     environment:
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
-      TOKENBIRYANI_KEY: ${TOKENBIRYANI_KEY:?run `docker compose run --rm --no-deps gateway keygen`}
+      TOKENBIRYANI_KEY: ${TOKENBIRYANI_KEY:-bir_dev_only_change_me_0123456789}
+      TOKENBIRYANI_SECRET_KEY: ${TOKENBIRYANI_SECRET_KEY:-}
+      # Optional. Leave it unset and add accounts from the console instead.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      MOCK_UPSTREAM_URL: http://mock:9911
     depends_on:
       redis:
         condition: service_healthy
+      mock:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # A stand-in Anthropic, bundled with the package. It models the per-credential
+  # prompt cache and the rate-limit headers, so the console has something real to
+  # draw and nothing here reaches the internet or costs money.
+  mock:
+    image: tokenbiryani:dev
+    build:
+      context: .
+      target: dev
+    entrypoint: ["python", "-m", "tokenbiryani.testing.server"]
+    command: ["--host", "0.0.0.0", "--port", "9911", "--accounts", "key-01,key-02,key-03"]
+    # Its own check, on its own port. Without this it inherits the image's, which
+    # probes 8787 and marks a perfectly healthy mock unhealthy forever.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9911/v1/models', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
     restart: unless-stopped
 
   redis:
@@ -37,3 +100,4 @@ services:
 
 volumes:
   redis-data:
+  gateway-state:

@@ -1,21 +1,60 @@
+# Keep the build context small and the image free of anything that is not the
+# application. Everything here is either regenerated, machine-local, or a secret.
+
+# --- VCS and CI ---
 .git
+.gitignore
 .github
+
+# --- local environments ---
 .venv
 venv
+env
+.env
+.env.*
+
+# --- Python build and cache artefacts ---
 __pycache__
 *.py[cod]
+*.egg-info
+dist
+build
+.eggs
 .pytest_cache
 .mypy_cache
 .ruff_cache
 .coverage
+.coverage.*
 htmlcov
-dist
-build
-*.egg-info
+.tox
+.nox
+
+# --- not part of the application ---
 benchmarks
-tests
 docs
+site
+mkdocs.yml
 scripts
-*.db
-*.sqlite3
+contrib
+*.md
+!README.md
+
+# --- editor and OS noise ---
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+
+# --- state, credentials and anything machine-local ---
+# The image must never carry a config or a key baked in: both are mounted or
+# passed as environment at run time.
 tokenbiryani.yaml
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+*.key
+.manual-test-key
+docker-compose.yml
+Dockerfile
+.dockerignore

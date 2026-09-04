@@ -210,7 +210,18 @@ class Gateway:
     @property
     def secrets(self) -> SecretBox:
         if self._secrets is None:
-            self._secrets = SecretBox(key_path=self.config.store.secret_key_path)
+            try:
+                self._secrets = SecretBox(key_path=self.config.store.secret_key_path)
+            except (SecretError, OSError) as exc:
+                # Reached the first time an account is stored, which is a request the
+                # operator is making from the console. A missing extra or an
+                # unwritable key path is their problem to fix, so say which it is
+                # rather than returning an opaque 500.
+                raise GatewayError(
+                    503,
+                    f"cannot store credentials: {exc}",
+                    kind="api_error",
+                ) from exc
         return self._secrets
 
     def is_config_account(self, account_id: str) -> bool:
