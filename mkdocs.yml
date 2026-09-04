@@ -1,0 +1,48 @@
+site_name: tokenbiryani
+site_description: A pooling gateway for Claude accounts.
+repo_url: https://github.com/OWNER/tokenbiryani
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle: { icon: material/weather-sunny, name: Light }
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle: { icon: material/weather-night, name: Dark }
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.details
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Why is my bill higher?: caching.md
+  - Routing: routing.md
+  - Streaming and retries: streaming.md
+  - Configuration: configuration.md
+  - Account types: providers.md
+  - Operating: operating.md
+  - Deployment: deployment.md
+  - Extending: extending.md
+  - Console design: UI-DESIGN.md
+  - Decisions:
+      - Sticky affinity by default: adr/0001-sticky-affinity-by-default.md
+      - Error taxonomy: adr/0002-error-taxonomy.md
+      - API keys only: adr/0003-api-keys-only.md

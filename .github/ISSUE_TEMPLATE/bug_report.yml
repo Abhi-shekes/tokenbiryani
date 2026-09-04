@@ -1,0 +1,55 @@
+name: Bug report
+description: Something behaved differently from what the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste API keys, virtual keys, or prompt contents. The request
+        id from `/admin/requests` and the account id are usually enough.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "0.1.0, or a commit sha"
+    validations: { required: true }
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Routing / failover
+        - Streaming
+        - Rate limits, leases or the queue
+        - Session affinity / prompt cache
+        - Keys and auth
+        - Console or admin API
+        - CLI
+        - A provider adapter (Bedrock / Vertex)
+        - Config or startup
+        - Something else
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        The most useful form is a failing test against the mock upstream
+        (`tokenbiryani.testing.mock_upstream`) — see CONTRIBUTING.
+      render: python
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: Redact api_key and key values.
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines or the request inspector output
+      render: shell

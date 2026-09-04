@@ -1,6 +1,7 @@
 # Biryani Console — UI design
 
-Companion to [PLAN.md](../PLAN.md). Covers the operator console (M5), the CLI surface,
+Companion to the
+[project plan](https://github.com/OWNER/tokenbiryani/blob/main/PLAN.md). Covers the operator console (M5), the CLI surface,
 and the visual system shared across both.
 
 ---

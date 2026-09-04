@@ -298,6 +298,12 @@ silently billing against stale numbers.
 
 ---
 
+## Documentation
+
+Full docs build from `docs/` with `mkdocs serve`. Start with
+[Why is my bill higher?](docs/caching.md) — it is the page that changes how you
+configure this thing.
+
 ## Status
 
 All eight milestones in `PLAN.md` are implemented and tested; see `TODO.md` for the

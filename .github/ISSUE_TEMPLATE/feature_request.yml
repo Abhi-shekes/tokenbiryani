@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose something the gateway should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you cannot do today?
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+  - type: dropdown
+    id: shape
+    attributes:
+      label: Does this fit an existing extension point?
+      description: >
+        Routing strategies and provider adapters can ship as separate packages;
+        see CONTRIBUTING. If yours fits one, it may not need to live here.
+      options:
+        - A routing strategy
+        - A provider adapter
+        - A state store backend
+        - Neither — it needs to be in the core
+    validations: { required: true }

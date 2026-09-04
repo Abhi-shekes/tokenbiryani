@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/OWNER/tokenbiryani/security/advisories/new
+    about: >
+      Please report privately. This project holds live API credentials — see
+      SECURITY.md.

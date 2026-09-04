@@ -29,6 +29,8 @@ redis = ["redis>=5.0"]
 bedrock = ["botocore>=1.31"]
 vertex = ["google-auth>=2.20"]
 all = ["redis>=5.0", "botocore>=1.31", "google-auth>=2.20"]
+# Pinned below MkDocs 2.0, which drops the plugin and theming systems this site uses.
+docs = ["mkdocs-material>=9.5,<10"]
 dev = [
   "pytest>=7.4", "pytest-asyncio>=0.21", "pytest-cov>=4.1", "ruff>=0.1",
   "mypy>=1.8", "types-PyYAML",

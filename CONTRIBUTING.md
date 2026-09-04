@@ -80,6 +80,9 @@ Both live behind clean interfaces with the mock available to test against:
 - Tests for behaviour, not for implementation detail. If a test needs a deterministic
   first pick, use `strategy="priority"` rather than asserting on the tie-break hash.
 
+Docs live in `docs/` and build with `pip install -e ".[docs]" && mkdocs serve`. CI
+builds them with `--strict`, so a broken internal link fails the build.
+
 Before pushing: `ruff check .`, `mypy`, and `pytest`. CI additionally builds the
 image and boots it, runs the store suite against a real Redis, and gates coverage
 at 80%.
