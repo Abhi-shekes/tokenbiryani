@@ -83,6 +83,16 @@ class EventLog:
         events = list(self._events)[-limit:]
         return [e.to_dict() for e in reversed(events)]
 
+    def recent_for(self, account_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Requests this account took part in, including attempts it failed."""
+        matched = [
+            event
+            for event in self._events
+            if event.account_id == account_id
+            or any(attempt.account_id == account_id for attempt in event.attempts)
+        ]
+        return [e.to_dict() for e in reversed(matched[-limit:])]
+
     def get(self, request_id: str) -> Optional[Dict[str, Any]]:
         for event in reversed(self._events):
             if event.request_id == request_id:

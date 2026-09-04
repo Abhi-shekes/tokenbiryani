@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request
@@ -41,9 +42,13 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
     @app.on_event("startup")
     async def _startup() -> None:
         await app.state.gateway.startup()
+        app.state.watcher = asyncio.ensure_future(app.state.gateway.watch_config())
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
+        watcher = getattr(app.state, "watcher", None)
+        if watcher is not None:
+            watcher.cancel()
         await app.state.gateway.aclose()
 
     def authenticate(request: Request) -> KeyConfig:
@@ -147,6 +152,22 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
     async def horizon(request: Request) -> JSONResponse:
         authenticate(request)
         return JSONResponse(app.state.gateway.capacity_horizon())
+
+    @app.get("/admin/accounts/{account_id}")
+    async def account_detail(request: Request, account_id: str) -> JSONResponse:
+        authenticate(request)
+        gateway: Gateway = app.state.gateway
+        account = gateway.accounts.get(account_id)
+        if account is None:
+            return _error(404, f"no such account: {account_id}", "not_found_error")
+        payload = account.snapshot(time.time())
+        payload["recent_requests"] = gateway.events.recent_for(account_id, 25)
+        return JSONResponse(payload)
+
+    @app.post("/admin/reload")
+    async def reload(request: Request) -> JSONResponse:
+        authenticate(request)
+        return JSONResponse(app.state.gateway.reload_from_path())
 
     @app.get("/admin/keys")
     async def keys(request: Request) -> JSONResponse:

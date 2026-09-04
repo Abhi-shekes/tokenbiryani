@@ -9,6 +9,9 @@ being hideable.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
 import random
 import time
 import uuid
@@ -17,7 +20,7 @@ from typing import Any, AsyncIterator, Dict, List, Mapping, Optional, Tuple
 
 import httpx
 
-from ..config import Config, KeyConfig
+from ..config import Config, ConfigError, KeyConfig
 from ..observability.events import Attempt, EventLog, RequestEvent
 from ..observability.metrics import Metrics
 from ..providers.anthropic_api import build_upstream
@@ -35,6 +38,8 @@ from .router import Decision, Router, RoutingContext
 from .session import session_key as compute_session_key
 
 MESSAGES_PATH = "/v1/messages"
+
+logger = logging.getLogger("tokenbiryani")
 
 
 class GatewayError(Exception):
@@ -116,6 +121,102 @@ class Gateway:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.config.server.request_timeout_seconds, connect=10.0)
             )
+
+    def reload(self, config: Config) -> Dict[str, Any]:
+        """Swap in a new config without dropping in-flight state.
+
+        Accounts that survive the reload keep their limit mirror, breaker and
+        counters — a config edit must not hand every account a clean bill of health
+        and re-stampede an upstream that was cooling for a good reason.
+        """
+        before = set(self.accounts)
+        after = [a.id for a in config.accounts]
+
+        for account_config in config.accounts:
+            existing = self.accounts.get(account_config.id)
+            if existing is None:
+                self.accounts[account_config.id] = AccountRuntime(
+                    config=account_config,
+                    breaker=CircuitBreaker(
+                        failure_threshold=config.breaker.failure_threshold,
+                        cooldown_seconds=config.breaker.cooldown_seconds,
+                    ),
+                )
+                self.upstreams[account_config.id] = build_upstream(account_config)
+                continue
+            credentials_changed = (
+                existing.config.api_key != account_config.api_key
+                or existing.config.base_url != account_config.base_url
+                or existing.config.type != account_config.type
+            )
+            existing.config = account_config
+            existing.breaker.failure_threshold = config.breaker.failure_threshold
+            existing.breaker.cooldown_seconds = config.breaker.cooldown_seconds
+            if credentials_changed:
+                self.upstreams[account_config.id] = build_upstream(account_config)
+                # New credentials deserve a fresh chance: a rotated key is the usual
+                # reason an account was disabled in the first place.
+                existing.disabled_reason = None
+                existing.breaker.record_success()
+
+        removed = [account_id for account_id in before if account_id not in after]
+        for account_id in removed:
+            self.accounts.pop(account_id, None)
+            self.upstreams.pop(account_id, None)
+
+        self.config = config
+        self.keys = KeyRegistry(config.keys)
+        self.router = Router(config.routing.strategy, config.routing.weights)
+        self.gate.max_size = config.queue.max_size
+        self.gate.default_max_wait = config.queue.default_max_wait_seconds
+
+        added = [account_id for account_id in after if account_id not in before]
+        return {
+            "accounts": after,
+            "added": added,
+            "removed": removed,
+            "strategy": self.router.strategy,
+        }
+
+    def reload_from_path(self) -> Dict[str, Any]:
+        """Re-read the config file. A broken file leaves the running config alone."""
+        if not self.config.path:
+            raise GatewayError(
+                400, "gateway was not started from a config file", kind="invalid_request_error"
+            )
+        try:
+            fresh = Config.load(self.config.path)
+        except (OSError, ConfigError) as exc:
+            raise GatewayError(
+                400, f"config reload failed, keeping the running config: {exc}",
+                kind="invalid_request_error",
+            ) from exc
+        return self.reload(fresh)
+
+    async def watch_config(self) -> None:
+        """Poll the config file's mtime and reload when it moves."""
+        interval = self.config.server.hot_reload_seconds
+        if not self.config.path or interval <= 0:
+            return
+        try:
+            last = os.path.getmtime(self.config.path)
+        except OSError:
+            return
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                current = os.path.getmtime(self.config.path)
+            except OSError:
+                continue
+            if current == last:
+                continue
+            last = current
+            try:
+                result = self.reload_from_path()
+            except GatewayError as exc:
+                logger.warning("config reload rejected: %s", exc.message)
+                continue
+            logger.info("config reloaded: %s", json.dumps(result))
 
     async def aclose(self) -> None:
         if self._client is not None and self._owns_client:

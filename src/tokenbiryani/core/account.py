@@ -79,6 +79,7 @@ class AccountRuntime:
 
     requests_total: int = 0
     failures_total: int = 0
+    error_kinds: Dict[str, int] = field(default_factory=dict)
     spend_usd: float = 0.0
     input_tokens_total: int = 0
     output_tokens_total: int = 0
@@ -157,6 +158,7 @@ class AccountRuntime:
             self.unsupported_models.add(model)
         self.outcomes.append(False)
         self.failures_total += 1
+        self.error_kinds[classification.kind] = self.error_kinds.get(classification.kind, 0) + 1
 
     def record_success(
         self, latency: float, usage: Usage, price: Optional[ModelPrice], now: float
@@ -221,6 +223,7 @@ class AccountRuntime:
             ),
             "requests_total": self.requests_total,
             "failures_total": self.failures_total,
+            "error_kinds": dict(self.error_kinds),
             "spend_usd": round(self.spend_usd, 4),
             "tokens": {
                 "input": self.input_tokens_total,

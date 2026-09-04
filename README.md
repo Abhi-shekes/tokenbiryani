@@ -121,6 +121,8 @@ tokenbiryani status --json   # same data, for scripts
 | `GET /healthz` | 200 while any account is ready |
 | `GET /metrics` | Prometheus |
 | `GET /admin/status` | pool snapshot |
+| `GET /admin/accounts/{id}` | one account: limits, error breakdown by class, its own recent requests |
+| `POST /admin/reload` | re-read the config file |
 | `GET /admin/requests/{id}` | **why that request went where it did** — attempt chain, per-candidate scores, verdicts |
 | `GET /admin/horizon` | projected capacity for the next hour |
 | `GET /admin/events` | live SSE feed |
@@ -149,8 +151,8 @@ Working today: passthrough and streaming, multi-account pooling, the error taxon
 retry and failover, the rate-limit mirror, token estimation and leases, headroom scoring,
 circuit breakers, session affinity and cache accounting, admission control and a bounded
 priority queue, virtual keys with model/pool/rpm/spend scoping, Prometheus metrics,
-structured logs, the admin API, and the CLI. 86 tests, plus an end-to-end smoke test over
-real sockets (`scripts/smoke.sh`).
+structured logs, config hot reload, the admin API, and the CLI. 95 tests, plus an
+end-to-end smoke test over real sockets (`scripts/smoke.sh`).
 
 Not built yet: the web console, the Redis state store for multi-instance, Bedrock and
 Vertex adapters, and the Message Batches spill lane. See `PLAN.md` for the roadmap and

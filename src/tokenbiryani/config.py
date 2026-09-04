@@ -111,6 +111,9 @@ class ServerConfig:
     port: int = 8787
     allow_remote: bool = False
     request_timeout_seconds: float = 600.0
+    #: Re-read the config file when its mtime changes. 0 disables polling; the
+    #: /admin/reload endpoint still works either way.
+    hot_reload_seconds: float = 5.0
 
 
 @dataclass

@@ -7,6 +7,9 @@ server:
   # Required to bind anything but loopback. Also requires at least one key below.
   allow_remote: false
   request_timeout_seconds: 600
+  # Re-read this file when its mtime changes. 0 disables polling; POST /admin/reload
+  # still works either way. A file that fails to parse leaves the running config alone.
+  hot_reload_seconds: 5
 
 routing:
   # sticky_headroom | headroom | cost_tiered | priority | least_loaded | round_robin
