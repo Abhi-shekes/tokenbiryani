@@ -124,6 +124,12 @@ class KeyConfig:
     pool: List[str] = field(default_factory=list)
     rpm: Optional[int] = None
     spend_cap_usd: Optional[float] = None
+    #: "interactive" (default) or "batch". Batch traffic yields the queue to
+    #: interactive traffic when the pool is saturated.
+    priority: str = "interactive"
+    #: How long this key's requests will wait for capacity before being told to
+    #: come back. Falls back to queue.default_max_wait_seconds.
+    max_wait_seconds: Optional[float] = None
 
     def supports_model(self, model: str) -> bool:
         for pattern in self.models:

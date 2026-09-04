@@ -130,6 +130,16 @@ tokenbiryani status --json   # same data, for scripts
 The request inspector is the point. `filtered — cooling, 27s remaining` is a complete
 answer; "load balanced" is not.
 
+### Request headers
+
+| Header | |
+|---|---|
+| `X-TokenBiryani-Session` | pin a conversation to one affinity key instead of the fingerprint |
+| `X-TokenBiryani-Priority` | `interactive` (default) or `batch`. Batch traffic yields the queue to interactive traffic when the pool is saturated |
+| `X-TokenBiryani-Max-Wait` | seconds this request will wait for capacity. A client can shorten its own budget but never extend it past the operator's ceiling |
+
+Per-key defaults for the last two live under `keys:` as `priority` and `max_wait_seconds`.
+
 ### Costs
 
 The gateway ships **no price list**. Costs are reported and spend caps enforced only for

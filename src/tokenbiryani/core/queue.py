@@ -17,6 +17,25 @@ from typing import List, Optional
 PRIORITY_INTERACTIVE = 0
 PRIORITY_BATCH = 10
 
+PRIORITIES = {"interactive": PRIORITY_INTERACTIVE, "batch": PRIORITY_BATCH}
+
+#: Clients name their priority; the queue orders by the number behind the name.
+PRIORITY_HEADER = "x-tokenbiryani-priority"
+MAX_WAIT_HEADER = "x-tokenbiryani-max-wait"
+
+
+def parse_priority(value: Optional[str], default: int = PRIORITY_INTERACTIVE) -> int:
+    if not value:
+        return default
+    return PRIORITIES.get(value.strip().lower(), default)
+
+
+def priority_name(level: int) -> str:
+    for name, value in PRIORITIES.items():
+        if value == level:
+            return name
+    return str(level)
+
 
 class QueueFull(Exception):
     """The wait queue is at capacity; shed load rather than grow latency silently."""

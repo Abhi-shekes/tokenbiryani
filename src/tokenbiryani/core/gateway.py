@@ -33,7 +33,15 @@ from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
 from .keys import KeyRegistry
 from .limits import TokenEstimate, estimate_request
-from .queue import PRIORITY_INTERACTIVE, CapacityGate, QueueFull, admission_check
+from .queue import (
+    MAX_WAIT_HEADER,
+    PRIORITY_HEADER,
+    CapacityGate,
+    QueueFull,
+    admission_check,
+    parse_priority,
+    priority_name,
+)
 from .router import Decision, Router, RoutingContext
 from .session import session_key as compute_session_key
 
@@ -355,6 +363,17 @@ class Gateway:
                     kind="rate_limit_error",
                 )
 
+        lowered = {k.lower(): v for k, v in headers.items()}
+        priority = parse_priority(
+            lowered.get(PRIORITY_HEADER), parse_priority(key.priority)
+        )
+        max_wait = _positive_float(
+            lowered.get(MAX_WAIT_HEADER),
+            key.max_wait_seconds
+            if key.max_wait_seconds is not None
+            else self.config.queue.default_max_wait_seconds,
+        )
+
         session = compute_session_key(body, headers)
         owner = await self.store.get_affinity(session)
         estimate = estimate_request(body, self.config.routing.estimate_safety_margin)
@@ -368,7 +387,13 @@ class Gateway:
             session_key=session,
             streamed=streamed,
         )
-        self.metrics.incr("tokenbiryani_requests_total", model=model, key=key.name)
+        event.priority = priority_name(priority)
+        self.metrics.incr(
+            "tokenbiryani_requests_total",
+            model=model,
+            key=key.name,
+            priority=priority_name(priority),
+        )
         return _Plan(
             body=body,
             headers=dict(headers),
@@ -380,11 +405,12 @@ class Gateway:
             event=event,
             started=now,
             deadline=now + self.config.retry.deadline_seconds,
+            priority=priority,
+            max_wait=max_wait,
         )
 
     async def _acquire(self, plan: _Plan) -> Tuple[AccountRuntime, Decision]:
         """Route, or wait on the queue for capacity that is known to be coming."""
-        queue_started = time.time()
         while True:
             now = time.time()
             if now >= plan.deadline:
@@ -405,7 +431,7 @@ class Gateway:
             )
             decision = self.router.select(self.accounts.values(), ctx)
             if decision.chosen is not None:
-                plan.event.queued_for = round(time.time() - queue_started, 3)
+                plan.event.queued_for = round(plan.queued_seconds, 3)
                 return decision.chosen, decision
 
             admission = admission_check(False, decision.soonest_available)
@@ -419,14 +445,31 @@ class Gateway:
                 self._fail(plan, error)
                 raise error
 
+            remaining_wait = plan.max_wait - plan.queued_seconds
+            if remaining_wait <= 0:
+                error = GatewayError(
+                    429,
+                    f"waited {plan.max_wait:.0f}s for pool capacity without any becoming "
+                    "available",
+                    kind="rate_limit_error",
+                    retry_after=decision.soonest_available,
+                )
+                self._fail(plan, error)
+                raise error
+
             budget = min(
                 plan.deadline - now,
-                self.config.queue.default_max_wait_seconds,
+                remaining_wait,
                 admission.retry_after + 0.25,
             )
-            self.metrics.incr("tokenbiryani_queued_total", model=plan.model)
+            self.metrics.incr(
+                "tokenbiryani_queued_total",
+                model=plan.model,
+                priority=priority_name(plan.priority),
+            )
+            waited_from = time.time()
             try:
-                await self.gate.wait(PRIORITY_INTERACTIVE, budget)
+                await self.gate.wait(plan.priority, budget)
             except QueueFull as exc:
                 error = GatewayError(
                     429,
@@ -436,6 +479,8 @@ class Gateway:
                 )
                 self._fail(plan, error)
                 raise error from exc
+            finally:
+                plan.queued_seconds += time.time() - waited_from
 
     async def _dispatch(
         self, account: AccountRuntime, plan: _Plan, path: str
@@ -835,12 +880,28 @@ class _Plan:
     event: RequestEvent
     started: float
     deadline: float
+    priority: int = 0
+    max_wait: float = 60.0
+    queued_seconds: float = 0.0
     excluded: List[str] = None  # type: ignore[assignment]
     attempts: int = 0
 
     def __post_init__(self) -> None:
         if self.excluded is None:
             self.excluded = []
+
+
+def _positive_float(raw: Optional[str], fallback: float) -> float:
+    """A client may shorten its own wait budget, never extend it past the operator's."""
+    if raw is None:
+        return fallback
+    try:
+        requested = float(raw)
+    except (TypeError, ValueError):
+        return fallback
+    if requested <= 0:
+        return 0.0
+    return min(requested, fallback)
 
 
 def _safe_json(response: httpx.Response) -> Optional[Dict[str, Any]]:

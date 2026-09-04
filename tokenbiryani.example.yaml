@@ -73,6 +73,12 @@ keys:
     pool: []             # empty means every account
     rpm: null
     spend_cap_usd: null
+    # interactive | batch — batch yields the queue when the pool is saturated
+    priority: interactive
+    # Seconds this key's requests wait for capacity. Null falls back to
+    # queue.default_max_wait_seconds. A client's X-TokenBiryani-Max-Wait header can
+    # shorten this but never extend it.
+    max_wait_seconds: null
 
 # USD per million tokens. Operator-supplied on purpose: the gateway ships no price list,
 # so it can never bill you against numbers that went stale in a release.

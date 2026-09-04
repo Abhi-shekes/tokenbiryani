@@ -33,6 +33,7 @@ class RequestEvent:
     key_name: str = ""
     session_key: str = ""
     streamed: bool = False
+    priority: str = "interactive"
     attempts: List[Attempt] = field(default_factory=list)
     account_id: Optional[str] = None
     status: Optional[int] = None
@@ -148,6 +149,8 @@ def _log_view(payload: Dict[str, Any]) -> Dict[str, Any]:
             "cache_read": payload["cache_read_tokens"],
         },
         "cache_hit": payload["cache_hit"],
+        "priority": payload["priority"],
+        "queued_for": payload["queued_for"],
         "affinity_broken": payload["affinity_broken"],
         "cost_usd": payload["cost_usd"],
     }
