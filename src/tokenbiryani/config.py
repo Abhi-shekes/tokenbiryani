@@ -228,6 +228,30 @@ class ObservabilityConfig:
 
 
 @dataclass
+class OAuthConfig:
+    """Where "Log in with Claude" sends people.
+
+    Deliberately empty by default. Anthropic does not publish the OAuth endpoints
+    its first-party clients use, and this project has never been run against a real
+    subscription session, so a hard-coded guess here would look like a working
+    feature and fail confusingly. Setting these three is the operator's decision —
+    see docs/oauth.md — and until they are set the login flow refuses with an error
+    that says exactly what is missing.
+    """
+
+    client_id: str = ""
+    authorize_url: str = ""
+    token_url: str = ""
+    #: Blank means the manual flow: the provider shows a code and the operator pastes
+    #: it into the console. Works without registering a callback anywhere.
+    redirect_uri: str = ""
+    scopes: List[str] = field(default_factory=list)
+    #: How far ahead of expiry a session is renewed, and how often that is checked.
+    refresh_skew_seconds: float = 300.0
+    refresh_interval_seconds: float = 60.0
+
+
+@dataclass
 class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     routing: RoutingConfig = field(default_factory=RoutingConfig)
@@ -238,6 +262,7 @@ class Config:
     store: StoreConfig = field(default_factory=StoreConfig)
     spend: SpendConfig = field(default_factory=SpendConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
+    oauth: OAuthConfig = field(default_factory=OAuthConfig)
     accounts: List[AccountConfig] = field(default_factory=list)
     keys: List[KeyConfig] = field(default_factory=list)
     pricing: Dict[str, ModelPrice] = field(default_factory=dict)
@@ -284,6 +309,10 @@ class Config:
             seen.add(account.id)
             if account.type == "anthropic_api" and not account.api_key:
                 raise ConfigError(f"account {account.id} has no api_key")
+            if account.type == "oauth" and account.observable_limits:
+                # Subscription sessions report no limits. Left true, the account
+                # reads as permanently full and wins every routing comparison.
+                account.observable_limits = False
 
         for key in keys:
             for account_id in key.pool:
@@ -302,6 +331,7 @@ class Config:
             store=build(StoreConfig, raw.get("store")),
             spend=build(SpendConfig, raw.get("spend")),
             observability=build(ObservabilityConfig, raw.get("observability")),
+            oauth=build(OAuthConfig, raw.get("oauth")),
             accounts=accounts,
             keys=keys,
             pricing=pricing,

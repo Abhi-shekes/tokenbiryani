@@ -1,12 +1,22 @@
-# tokenbiryani-oauth
+# tokenbiryani-oauth — deprecated
 
-Adds a `type: oauth` account to the [tokenbiryani](../../README.md) gateway, backed by
-a Claude subscription session instead of an API key.
+> **`type: oauth` is built into tokenbiryani now. You do not need this package.**
+>
+> Uninstall it. Your existing configuration keeps working: core absorbed this
+> package's token sources unchanged, so `options.credentials_path`,
+> `options.token_env` and `options.access_token` mean exactly what they meant here.
+>
+> Core also adds what this package could not: a browser login (OAuth 2.0 + PKCE) with
+> a separate session per account, and background refresh. That is what makes pooling
+> more than one subscription possible — a single shared credentials file never could.
+> See [docs/oauth.md](../../docs/oauth.md) and
+> [ADR-0004](../../docs/adr/0004-subscription-login-in-core.md).
+>
+> The entry point is gone, because a plugin may not shadow a built-in account type.
+> What remains is a re-export shim that warns on import.
 
-It is a **separate distribution on purpose**. The core gateway does not depend on it,
-does not reference it, and works fine without it. This directory is self-contained —
-its own `pyproject.toml`, LICENSE and tests — so it can be moved to its own repository
-whenever you want, with no changes.
+Everything below describes what an `oauth` account costs you. It is **still accurate**
+and still worth reading before you use one.
 
 ---
 

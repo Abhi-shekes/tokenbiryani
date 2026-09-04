@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from ..observability.usage import USAGE_FIELDS
 from .base import StateStore
 
 SCHEMA = """
@@ -42,6 +43,25 @@ CREATE TABLE IF NOT EXISTS managed_accounts (
     id      TEXT PRIMARY KEY,
     record  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS usage_events (
+    at                    REAL NOT NULL,
+    account_id            TEXT NOT NULL,
+    key_name              TEXT NOT NULL,
+    model                 TEXT NOT NULL,
+    status                INTEGER NOT NULL,
+    input_tokens          INTEGER NOT NULL,
+    output_tokens         INTEGER NOT NULL,
+    cache_read_tokens     INTEGER NOT NULL,
+    cache_creation_tokens INTEGER NOT NULL,
+    cost_usd              REAL NOT NULL,
+    latency               REAL NOT NULL,
+    affinity_broken       INTEGER NOT NULL,
+    via                   TEXT NOT NULL,
+    error                 TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS usage_at ON usage_events (at);
+CREATE INDEX IF NOT EXISTS usage_account ON usage_events (account_id, at);
 
 CREATE TABLE IF NOT EXISTS key_requests (
     key_name TEXT NOT NULL,
@@ -100,6 +120,9 @@ class SqliteStateStore(StateStore):
             "DELETE FROM spend_ledger WHERE at < ?", (now - LEDGER_RETENTION_SECONDS,)
         )
         conn.execute("DELETE FROM key_requests WHERE at < ?", (now - 3600.0,))
+        conn.execute(
+            "DELETE FROM usage_events WHERE at < ?", (now - LEDGER_RETENTION_SECONDS,)
+        )
         conn.commit()
 
     # ---- interface -----------------------------------------------------------
@@ -175,6 +198,39 @@ class SqliteStateStore(StateStore):
                 (scope, name, time.time() - window_seconds),
             ).fetchone()
             return float(row[0]) if row else 0.0
+
+        return await self._run(query)
+
+    async def record_usage(self, sample: Dict[str, Any]) -> None:
+        columns = ", ".join(USAGE_FIELDS)
+        placeholders = ", ".join("?" for _ in USAGE_FIELDS)
+        values = tuple(sample.get(field) for field in USAGE_FIELDS)
+
+        def write(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                f"INSERT INTO usage_events ({columns}) VALUES ({placeholders})", values
+            )
+            conn.commit()
+
+        await self._run(write)
+
+    async def usage_rows(
+        self, since: float, until: float, account_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        columns = ", ".join(USAGE_FIELDS)
+
+        def query(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+            if account_id is None:
+                sql = f"SELECT {columns} FROM usage_events WHERE at >= ? AND at < ?"
+                params: tuple = (since, until)
+            else:
+                sql = (
+                    f"SELECT {columns} FROM usage_events "
+                    "WHERE account_id = ? AND at >= ? AND at < ?"
+                )
+                params = (account_id, since, until)
+            rows = conn.execute(sql + " ORDER BY at", params).fetchall()
+            return [dict(zip(USAGE_FIELDS, row)) for row in rows]
 
         return await self._run(query)
 

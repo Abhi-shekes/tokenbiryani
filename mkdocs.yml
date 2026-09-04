@@ -38,6 +38,8 @@ nav:
   - Streaming and retries: streaming.md
   - Configuration: configuration.md
   - Account types: providers.md
+  - Subscription accounts: oauth.md
+  - Usage and charts: usage.md
   - Operating: operating.md
   - Deployment: deployment.md
   - Extending: extending.md
@@ -46,3 +48,4 @@ nav:
       - Sticky affinity by default: adr/0001-sticky-affinity-by-default.md
       - Error taxonomy: adr/0002-error-taxonomy.md
       - API keys only: adr/0003-api-keys-only.md
+      - Subscription login in core: adr/0004-subscription-login-in-core.md

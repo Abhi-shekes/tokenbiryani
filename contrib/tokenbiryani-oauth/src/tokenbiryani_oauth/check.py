@@ -12,7 +12,7 @@ import sys
 import time
 from typing import List, Optional
 
-from .credentials import (
+from tokenbiryani.providers.oauth_credentials import (
     DEFAULT_EXPIRY_PATH,
     DEFAULT_PATH,
     DEFAULT_TOKEN_PATH,

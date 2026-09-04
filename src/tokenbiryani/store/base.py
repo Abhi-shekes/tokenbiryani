@@ -49,6 +49,20 @@ class StateStore(abc.ABC):
         """Every name in a scope, for hydrating in-memory counters at startup."""
 
     @abc.abstractmethod
+    async def record_usage(self, sample: Dict[str, object]) -> None:
+        """Append one request's accounting to the usage history.
+
+        Telemetry, not billing — `add_spend` remains the record a cap is enforced
+        against. Losing a row here costs a notch on a chart, nothing more.
+        """
+
+    @abc.abstractmethod
+    async def usage_rows(
+        self, since: float, until: float, account_id: Optional[str] = None
+    ) -> List[Dict[str, object]]:
+        """Raw usage rows in a window. Bucketing happens in `observability.usage`."""
+
+    @abc.abstractmethod
     async def put_key(self, record: Dict[str, object]) -> None:
         """Store a managed key record. Records hold a hash, never the key itself."""
 

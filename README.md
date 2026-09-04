@@ -8,7 +8,7 @@ honestly when the whole pool is dry.
 ```bash
 pip install tokenbiryani          # or: pipx install tokenbiryani
 tokenbiryani init                 # writes tokenbiryani.yaml + a virtual key
-tokenbiryani serve
+tokenbiryani serve                # then add your accounts at /console
 
 export ANTHROPIC_BASE_URL=http://localhost:8787
 export ANTHROPIC_AUTH_TOKEN=bir_...   # printed by `init`
@@ -144,11 +144,40 @@ start rather than expose your credentials to the network.
 
 ## Operating it
 
-Open **`http://localhost:8787/console`** for the pool, the capacity horizon, a live
-request feed, the routing inspector, per-account detail, and key management. It is one
-server-rendered HTML file inside the package — no build step, no Node toolchain added to
-a `pipx install`. The shell carries no data and needs no key; it asks for an admin key on
-first load and keeps it in that browser only.
+Open **`http://localhost:8787/console`**. Everything the gateway can do, it can do from
+there:
+
+- **Accounts** — add, name, test, rename, rotate, enable, disable and delete
+  credentials without editing a file. Anthropic API keys, Bedrock, Vertex, and Claude
+  subscriptions via a browser login. Credentials are encrypted at rest; accounts
+  declared in `tokenbiryani.yaml` render locked, because the file is yours.
+- **Usage** — token, cost and cache-hit-rate charts over 1h / 24h / 7d / 30d, grouped
+  by account, model or virtual key, with a totals table. This history is persisted, so
+  it survives a restart. See [docs/usage.md](docs/usage.md).
+- **Overview** — capacity horizon, live request feed, per-account meters.
+- **Requests** — the routing inspector: why each request went where it did.
+- **Connect a client** — the exact export lines for this gateway's address.
+- **Keys** — mint and revoke virtual keys.
+
+It is one server-rendered page plus a stylesheet, inside the package — no build step, no
+Node toolchain added to a `pipx install`. The shell carries no data and needs no key; it
+asks for an admin key on first load and keeps it in that browser only.
+
+### Does it actually work against the real API?
+
+The one thing no mock can tell you is whether Anthropic spells its rate-limit headers
+the way the router expects. If it doesn't, the mirror stays empty, every account reads
+as full, and routing quietly degrades to round-robin — shredding the prompt cache while
+looking healthy.
+
+```bash
+tokenbiryani doctor --api-key sk-ant-...
+```
+
+One real request, `max_tokens=1`. It prints the headers the upstream actually returned
+next to the nine the limit mirror looks for, and what the mirror parsed out of them.
+Non-zero exit if anything is missing. Run it once after you first point this at
+production.
 
 Or stay in the terminal:
 
@@ -175,6 +204,8 @@ tokenbiryani status --json   # same data, for scripts
 | `GET /healthz` | 200 while any account is ready |
 | `GET /metrics` | Prometheus |
 | `GET /admin/status` | pool snapshot |
+| `GET /admin/usage` | bucketed usage history for the charts |
+| `POST /admin/accounts` · `PATCH` · `DELETE` · `POST /admin/accounts/{id}/test` | manage credentials at runtime |
 | `POST /admin/keys` · `DELETE /admin/keys/{name}` | mint and revoke keys at runtime |
 | `GET /admin/accounts/{id}` | one account: limits, error breakdown by class, its own recent requests |
 | `POST /admin/reload` | re-read the config file |
@@ -219,9 +250,9 @@ spill lane is an optimisation, never a dependency. Streaming requests never spil
 | `anthropic_api` | Anthropic API keys. The default. |
 | `bedrock` | AWS Bedrock. SigV4-signed; its binary event-stream is decoded back to SSE so the rest of the gateway sees ordinary streaming. Needs `pip install "tokenbiryani[bedrock]"`. |
 | `vertex` | Google Vertex AI. Bearer token from application-default credentials; returns real SSE already. Needs `pip install "tokenbiryani[vertex]"`. |
-| `oauth` | A Claude subscription session. Ships as a **separate** package, `contrib/tokenbiryani-oauth/` — core neither depends on it nor installs it. Read its README first: subscription sessions send no rate-limit headers, so such an account loses headroom routing, leases and the capacity horizon. |
+| `oauth` | A Claude subscription (Max/Pro), added by logging in from the console. Read [docs/oauth.md](docs/oauth.md) first: subscription sessions send no rate-limit headers, so such an account loses headroom routing, leases and the capacity horizon — and the login stays disabled until you supply the provider endpoints, which this project will not guess at. |
 
-All three sit in one pool, so a request can fail over from an API key to Bedrock. Use
+All four sit in one pool, so a request can fail over from an API key to Bedrock. Use
 `options.model_map` to translate your callers' model names into each platform's ids.
 
 ```yaml

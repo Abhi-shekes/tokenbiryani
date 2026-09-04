@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request
@@ -19,9 +18,18 @@ from fastapi.responses import (
 
 from ..config import Config, KeyConfig
 from ..core.gateway import Gateway, GatewayError
-from ..dashboard import console_html
+from ..dashboard import console_css, console_html
 
 ANTHROPIC_PREFIX = "/v1"
+
+
+def _escape(value: str) -> str:
+    """The OAuth callback echoes provider-supplied text into HTML."""
+    return (
+        str(value)
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        .replace('"', "&quot;").replace("'", "&#39;")
+    )
 
 
 def _credential(request: Request) -> Optional[str]:
@@ -52,10 +60,11 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         await app.state.gateway.startup()
         app.state.watcher = asyncio.ensure_future(app.state.gateway.watch_config())
         app.state.resync = asyncio.ensure_future(app.state.gateway.resync_spend())
+        app.state.sessions = asyncio.ensure_future(app.state.gateway.watch_oauth_sessions())
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
-        for name in ("watcher", "resync"):
+        for name in ("watcher", "resync", "sessions"):
             task = getattr(app.state, name, None)
             if task is not None:
                 task.cancel()
@@ -155,6 +164,17 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         # authenticated, and the key it uses never leaves the browser.
         return HTMLResponse(console_html())
 
+    @app.get("/console.css", include_in_schema=False)
+    async def console_stylesheet() -> Response:
+        # no-cache, not no-store: the browser may keep it, but must revalidate.
+        # The shell is never cached, so a stylesheet the browser held across an
+        # upgrade would style the new markup with the old rules.
+        return Response(
+            console_css(),
+            media_type="text/css",
+            headers={"cache-control": "no-cache"},
+        )
+
     @app.get("/healthz")
     async def healthz() -> JSONResponse:
         snapshot = app.state.gateway.snapshot()
@@ -177,6 +197,10 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
     @app.get("/admin/status")
     async def status(request: Request) -> JSONResponse:
         authenticate_admin(request)
+        # Merge in anything managed that was added elsewhere — another replica, the
+        # API, a second console tab. This is the console's polling endpoint, so
+        # without it an account you just created stays invisible until a restart.
+        await app.state.gateway.refresh_accounts()
         return JSONResponse(app.state.gateway.snapshot())
 
     @app.get("/admin/horizon")
@@ -184,15 +208,32 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         authenticate_admin(request)
         return JSONResponse(app.state.gateway.capacity_horizon())
 
+    @app.get("/admin/usage")
+    async def usage(
+        request: Request,
+        window: Optional[str] = None,
+        bucket: Optional[str] = None,
+        group_by: str = "account",
+        account: Optional[str] = None,
+    ) -> JSONResponse:
+        """Persisted usage, bucketed for charting.
+
+        `window` accepts a label the console sends (`1h`, `24h`, `7d`, `30d`) or a
+        raw second count; `group_by` is account, model or key.
+        """
+        authenticate_admin(request)
+        return JSONResponse(
+            await app.state.gateway.usage(
+                window=window, bucket=bucket, group_by=group_by, account_id=account
+            )
+        )
+
     @app.get("/admin/accounts/{account_id}")
     async def account_detail(request: Request, account_id: str) -> JSONResponse:
         authenticate_admin(request)
-        gateway: Gateway = app.state.gateway
-        account = gateway.accounts.get(account_id)
-        if account is None:
+        payload = app.state.gateway.account_detail(account_id)
+        if payload is None:
             return _error(404, f"no such account: {account_id}", "not_found_error")
-        payload = account.snapshot(time.time())
-        payload["recent_requests"] = gateway.events.recent_for(account_id, 25)
         return JSONResponse(payload)
 
     @app.get("/admin/accounts")
@@ -239,6 +280,67 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
     async def test_account(request: Request, account_id: str) -> JSONResponse:
         authenticate_admin(request)
         return JSONResponse(await app.state.gateway.test_account(account_id))
+
+    # ---- subscription login --------------------------------------------------
+
+    @app.get("/admin/oauth/config")
+    async def oauth_config(request: Request) -> JSONResponse:
+        """Whether "Log in with Claude" is usable, so the console can say why not."""
+        authenticate_admin(request)
+        gateway: Gateway = app.state.gateway
+        settings = config.oauth
+        return JSONResponse({
+            "configured": gateway.oauth.configured,
+            "manual": not settings.redirect_uri,
+            "redirect_uri": settings.redirect_uri,
+            "missing": [
+                name for name, value in (
+                    ("oauth.client_id", settings.client_id),
+                    ("oauth.authorize_url", settings.authorize_url),
+                    ("oauth.token_url", settings.token_url),
+                ) if not value
+            ],
+        })
+
+    @app.post("/admin/oauth/start")
+    async def oauth_start(request: Request) -> JSONResponse:
+        authenticate_admin(request)
+        payload = await read_body(request)
+        return JSONResponse(await app.state.gateway.oauth_start(
+            str(payload.get("id") or ""), str(payload.get("name") or "")
+        ))
+
+    @app.post("/admin/oauth/complete")
+    async def oauth_complete(request: Request) -> JSONResponse:
+        authenticate_admin(request)
+        payload = await read_body(request)
+        record = await app.state.gateway.oauth_complete(
+            str(payload.get("state") or ""), str(payload.get("code") or "")
+        )
+        return JSONResponse(record, status_code=201)
+
+    @app.get("/admin/oauth/callback", include_in_schema=False)
+    async def oauth_callback(code: str = "", state: str = "", error: str = "") -> Response:
+        """Where the provider lands when a redirect_uri is configured.
+
+        Deliberately keyless and deliberately does not complete the exchange: the
+        provider redirects a browser here, and that browser carries no admin key.
+        It hands the code back to the console, which completes the login with one.
+        """
+        return HTMLResponse(
+            "<!doctype html><meta charset=utf-8>"
+            "<title>tokenbiryani — authorized</title>"
+            "<body style='font:14px system-ui;margin:64px auto;max-width:420px'>"
+            + (
+                f"<h3>Authorization failed</h3><p>{_escape(error)}</p>"
+                if error else
+                "<h3>Authorized</h3><p>Copy this code into the console to finish "
+                f"adding the account.</p><p><code style='word-break:break-all'>"
+                f"{_escape(code)}</code></p>"
+                f"<p style='color:#666'>state {_escape(state)}</p>"
+            )
+            + "</body>"
+        )
 
     @app.post("/admin/reload")
     async def reload(request: Request) -> JSONResponse:
