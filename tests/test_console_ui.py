@@ -326,3 +326,53 @@ def test_switching_back_to_an_api_key_restores_the_credential_form(page):
     assert page.is_hidden("#m-start-login")
     page.click("#m-cancel")
     page.wait_for_selector(".modal", state="detached")
+
+
+def test_the_landing_page_is_what_an_unauthenticated_visitor_gets(page, live):
+    """A fresh context, because the shared page is already signed in.
+
+    A second sync_playwright() would nest inside the fixture's and raise, so this
+    borrows that browser and opens a clean context — which also gets clean
+    localStorage, and therefore the landing page rather than a restored session.
+    """
+    context = page.context.browser.new_context(viewport={"width": 1280, "height": 900})
+    visitor = context.new_page()
+    errors = []
+    visitor.on("pageerror", lambda exc: errors.append(str(exc)))
+    try:
+        visitor.goto(live + "/console", wait_until="networkidle")
+        visitor.wait_for_selector("#gate:not(.hidden)", timeout=10000)
+
+        # Lowercased: the eyebrow is uppercased by CSS, so inner_text shouts it.
+        text = visitor.inner_text("#gate").lower()
+        assert "pooling gateway for claude accounts" in text
+        assert "sign in" in text
+        # The address it is about to connect to, filled in at boot.
+        assert visitor.inner_text("#lp-addr").strip()
+        assert live.split("//")[1] in visitor.inner_text("#lp-base")
+        # A drawn mark in the header and the favicon, not an emoji.
+        assert visitor.query_selector(".lp-top .mark")
+        assert "127835" not in visitor.get_attribute("link[rel=icon]", "href")
+
+        # And it is still the way in.
+        visitor.fill("#gate-key", "bir_test")
+        visitor.click("#gate-go")
+        visitor.wait_for_selector("#app:not(.hidden)", timeout=15000)
+        visitor.wait_for_selector("#accounts-wrap tr[data-account]", timeout=15000)
+        assert visitor.is_hidden("#gate")
+        assert errors == [], errors
+    finally:
+        context.close()
+
+
+def test_a_rejected_key_returns_you_to_the_landing_page_with_a_reason(page):
+    page.evaluate("signOut('That key was rejected.')")
+    page.wait_for_selector("#gate:not(.hidden)")
+    assert "rejected" in page.inner_text("#gate-msg")
+    # Sign back in so the module-scoped page is usable by later tests. Signing in
+    # does not reset the open tab, so say which one we want.
+    page.fill("#gate-key", "bir_test")
+    page.click("#gate-go")
+    page.wait_for_selector("#app:not(.hidden)", timeout=15000)
+    page.click(".nav button[data-tab='pool']")
+    page.wait_for_selector("#stream [data-request]", timeout=15000)

@@ -102,3 +102,48 @@ async def test_a_rolled_window_shows_a_real_countdown(gateway_factory, mock, key
 
     reset_in = gateway.accounts["a"].mirror.input_tokens.seconds_to_reset(time.time())
     assert reset_in is not None and reset_in > 0, "the console would show 'now' forever"
+
+
+def test_the_landing_page_says_what_this_is_before_asking_for_a_key():
+    """An unauthenticated visitor used to get a bare box. Now they get a page."""
+    html = console_html()
+    assert 'class="lp ' in html, "the landing page shell"
+    assert "Pooling gateway for Claude accounts" in html
+    assert 'id="gate-key"' in html, "and the key field is still on it"
+    assert 'id="gate-go"' in html
+    # The value proposition, not just a form.
+    assert "1.94x" in html, "the claim the project is built on"
+
+
+def test_the_mark_is_drawn_not_an_emoji():
+    """An emoji in a coloured square is not a logo, and it dies at 16px."""
+    html = console_html()
+    assert "&#127835;" not in html, "the curry emoji is gone"
+    assert 'class="mark"' in html
+    # Same silhouette in the favicon, so the tab and the header agree.
+    assert "M6 10.5h20v10.5" in html
+    assert html.count("M6 10.5h20v10.5") >= 4, "favicon plus every lockup"
+
+
+def test_the_console_files_are_re_read_when_they_change(tmp_path, monkeypatch):
+    """Caching outright meant editing the console and refreshing showed the old page.
+
+    That bit under `serve --reload`, which watches Python files but not these, and
+    in a container with the source bind-mounted.
+    """
+    import os
+    import time
+
+    from tokenbiryani import dashboard
+
+    path = tmp_path / "console.html"
+    path.write_text("first")
+    monkeypatch.setattr(dashboard, "CONSOLE_PATH", str(path))
+    monkeypatch.setattr(dashboard, "_cache", {})
+
+    assert dashboard.console_html() == "first"
+    assert dashboard.console_html() == "first", "unchanged files are still cached"
+
+    path.write_text("second")
+    os.utime(path, (time.time() + 2, time.time() + 2))
+    assert dashboard.console_html() == "second", "a changed file is re-read"

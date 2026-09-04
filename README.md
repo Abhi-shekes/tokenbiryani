@@ -138,8 +138,9 @@ package, so it comes up healthy, costs nothing and reaches nothing — then you 
 `http://localhost:8787/console` and add real accounts there.
 
 `./src` is bind-mounted and watched, so editing a file on the host restarts the
-gateway in about a second; `./tests` is mounted too, so
-`docker compose exec gateway pytest -q` runs the suite against the running stack.
+gateway in about a second; the console's HTML and CSS need only a browser refresh;
+and `./tests` is mounted too, so `docker compose exec gateway pytest -q` runs the
+suite against the running stack.
 
 The image runs as a non-root user, carries a healthcheck wired to `/healthz`, and
 publishes to `127.0.0.1` rather than your LAN. `docker compose` builds the Dockerfile's

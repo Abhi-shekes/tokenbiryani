@@ -41,6 +41,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Usage screen: persisted history over 1h / 24h / 7d / 30d, grouped by account, model
   or key, with token, cost and cache-hit charts, a totals table and hover detail.
 - "Connect a client" screen with the exact export lines for this gateway's address.
+- A landing page at `/console` for anyone not signed in: what the gateway is, the
+  endpoint to point clients at, and the admin-key field, rather than a bare box.
+- A drawn mark — a sealed, layered pot — replacing the emoji, legible down to a 16px
+  favicon where the emoji was not.
 - First-run wizard replaces the copy-this-YAML empty state.
 - Rebuilt on a sidebar shell; the stylesheet is served from `/console.css`.
 
@@ -96,6 +100,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it previously returned only live runtime state, so the console could not show what
   it was called.
 - SQLite WAL sidecars (`*.db-shm`, `*.db-wal`) are no longer tracked by git.
+- `docker/tokenbiryani.yaml` is in the repository. An unanchored `tokenbiryani.yaml`
+  ignore rule matched it at every depth, so the file `docker compose up` mounts was
+  never committed and a fresh clone could not start the stack.
+- The console page and stylesheet are re-read when they change on disk. They were
+  cached for the life of the process, so editing the console under `serve --reload`
+  or with the source bind-mounted showed the old page until something restarted it.
+- `.manual-test-key`, a credential-encryption key for a database that no longer
+  exists, is no longer committed.
 
 ### Security
 - Subscription access and refresh tokens are encrypted at rest and stripped by name
