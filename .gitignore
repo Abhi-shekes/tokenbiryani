@@ -5,6 +5,7 @@ venv/
 *.egg-info/
 dist/
 build/
+site/
 .pytest_cache/
 .coverage
 htmlcov/
@@ -12,5 +13,11 @@ htmlcov/
 .ruff_cache/
 tokenbiryani.yaml
 *.db
+# SQLite's WAL sidecars. *.db does not cover these, so they were committed by
+# accident and showed up dirty after every local run.
+*.db-shm
+*.db-wal
 *.sqlite3
+# Credential-encryption keys for stored accounts. Never commit one.
+*.key
 .env
