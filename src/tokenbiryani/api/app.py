@@ -8,10 +8,18 @@ import time
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 
 from ..config import Config, KeyConfig
 from ..core.gateway import Gateway, GatewayError
+from ..dashboard import console_html
 
 ANTHROPIC_PREFIX = "/v1"
 
@@ -136,6 +144,16 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         )
 
     # ---- operational surface -------------------------------------------------
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> Response:
+        return RedirectResponse("/console")
+
+    @app.get("/console", include_in_schema=False)
+    async def console() -> Response:
+        # The shell carries no data, so it needs no key. Every call it makes is
+        # authenticated, and the key it uses never leaves the browser.
+        return HTMLResponse(console_html())
 
     @app.get("/healthz")
     async def healthz() -> JSONResponse:

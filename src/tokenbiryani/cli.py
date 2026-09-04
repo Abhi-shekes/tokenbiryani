@@ -283,6 +283,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
             port,
         )
     )
+    print(f"  console  http://{host}:{port}/console")
+    print(f"  api      ANTHROPIC_BASE_URL=http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level=args.log_level)
     return 0
 

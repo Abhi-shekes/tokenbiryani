@@ -108,6 +108,14 @@ point is retried silently on another account. A failure **after** it arrives as 
 
 ## Operating it
 
+Open **`http://localhost:8787/console`** for the pool, the capacity horizon, a live
+request feed, the routing inspector, per-account detail, and key management. It is one
+server-rendered HTML file inside the package — no build step, no Node toolchain added to
+a `pipx install`. The shell carries no data and needs no key; it asks for an admin key on
+first load and keeps it in that browser only.
+
+Or stay in the terminal:
+
 ```bash
 tokenbiryani status          # the pool, in the terminal you're already in
 tokenbiryani status --json   # same data, for scripts
@@ -125,6 +133,7 @@ tokenbiryani status --json   # same data, for scripts
 
 | Endpoint | |
 |---|---|
+| `GET /console` | the operator console |
 | `POST /v1/messages` | Messages API, streaming and not |
 | `POST /v1/messages/count_tokens`, `GET /v1/models` | passthrough |
 | `GET /healthz` | 200 while any account is ready |
@@ -263,12 +272,11 @@ structured logs, config hot reload, the admin API, and the CLI. Request priority
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
 and windowed spend, a Redis store for multi-instance deployments, and runtime key
 management behind an admin boundary, plus Bedrock and Vertex adapters and pluggable
-routing strategies. 182 tests, plus an end-to-end smoke test over real sockets
-(`scripts/smoke.sh`).
+routing strategies, and the operator console. 190 tests, plus an end-to-end smoke test
+over real sockets (`scripts/smoke.sh`).
 
-Not built yet: the web console, the Redis state store for multi-instance, Bedrock and
-Vertex adapters, and the Message Batches spill lane. See `PLAN.md` for the roadmap and
-`docs/UI-DESIGN.md` for the console design.
+All eight milestones in `PLAN.md` are built. `docs/UI-DESIGN.md` is the console's design
+brief, and the console follows it.
 
 **Credential types.** Anthropic API keys are the supported path. Pooling Pro/Max
 *subscription* accounts runs against Anthropic's consumer terms, and those sessions

@@ -17,6 +17,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A leftover process from an earlier run would answer every check and quietly test
+# the wrong build. Refuse to start rather than report a misleading pass.
+port_free() {
+  local port=$1 name=$2
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    exec 3>&- 3<&-
+    echo "FAIL: something is already listening on $port ($name). Stop it and retry."
+    exit 1
+  fi
+}
+
 wait_for() {
   local url=$1 name=$2 tries=0
   until curl -sf -o /dev/null "$url"; do
@@ -31,6 +42,9 @@ say() { printf '  %-46s %s\n' "$1" "$2"; }
 echo
 echo "smoke: mock upstream :$UPSTREAM_PORT -> gateway :$GATEWAY_PORT"
 echo
+
+port_free "$UPSTREAM_PORT" "mock upstream"
+port_free "$GATEWAY_PORT" "gateway"
 
 python3 -m tokenbiryani.testing.server --port "$UPSTREAM_PORT" --accounts key-a,key-b \
   >"$WORK/upstream.log" 2>&1 &
@@ -116,7 +130,13 @@ curl -sS "http://127.0.0.1:$GATEWAY_PORT/metrics" | grep -q tokenbiryani_request
   || fail "metrics missing"
 say "prometheus metrics" "ok"
 
-# 8. the CLI
+# 8. the console
+CONSOLE=$(curl -sS "http://127.0.0.1:$GATEWAY_PORT/console")
+echo "$CONSOLE" | grep -q "tokenbiryani console" || fail "console not served"
+echo "$CONSOLE" | grep -q "$KEY" && fail "the console shell must not contain the key"
+say "console" "ok"
+
+# 9. the CLI
 STATUS=$(TOKENBIRYANI_URL="http://127.0.0.1:$GATEWAY_PORT" \
   python3 -m tokenbiryani.cli status --key "$KEY" --no-color)
 echo "$STATUS" | grep -q "acct-01" || fail "cli status: $STATUS"
