@@ -164,6 +164,22 @@ store:
   path: tokenbiryani.db
 ```
 
+### Running more than one instance
+
+`store.backend: redis` shares affinity, the spend ledger and per-key rate counters
+between processes. Without it two instances each keep their own affinity map — so a
+conversation ping-pongs between them and loses its cache — and each enforces its own
+half of every spend cap.
+
+```yaml
+store:
+  backend: redis
+  url: redis://127.0.0.1:6379/0
+  namespace: tokenbiryani
+```
+
+Needs the optional dependency: `pip install "tokenbiryani[redis]"`.
+
 ### Costs
 
 The gateway ships **no price list**. Costs are reported and spend caps enforced only for
@@ -187,8 +203,8 @@ circuit breakers, session affinity and cache accounting, admission control and a
 priority queue, virtual keys with model/pool/rpm/spend scoping, Prometheus metrics,
 structured logs, config hot reload, the admin API, and the CLI. Request priority with a
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
-and windowed spend. 135 tests, plus an end-to-end smoke test over real sockets
-(`scripts/smoke.sh`).
+and windowed spend, and a Redis store for multi-instance deployments. 148 tests, plus an
+end-to-end smoke test over real sockets (`scripts/smoke.sh`).
 
 Not built yet: the web console, the Redis state store for multi-instance, Bedrock and
 Vertex adapters, and the Message Batches spill lane. See `PLAN.md` for the roadmap and

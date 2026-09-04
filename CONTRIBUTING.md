@@ -28,6 +28,13 @@ It also runs as a real server for smoke tests:
 python -m tokenbiryani.testing.server --port 9911 --accounts key-a,key-b
 ```
 
+## State stores
+
+`memory`, `sqlite` and `redis` are held to identical behaviour by one parametrised
+suite in `tests/test_store.py` — add a backend there and it inherits every test. The
+Redis backend runs against `fakeredis` by default; set `TOKENBIRYANI_REDIS_URL` to run
+the same store against a real server, which is where range-bound semantics differ.
+
 ## Good first issues
 
 Both live behind clean interfaces with the mock available to test against:

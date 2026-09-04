@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import time
+import uuid
 
 import pytest
 from conftest import body, build, make_config
@@ -11,15 +14,28 @@ from tokenbiryani.config import Config, KeyConfig
 from tokenbiryani.core.gateway import GatewayError
 from tokenbiryani.store.base import SCOPE_ACCOUNT, SCOPE_KEY, build_store
 from tokenbiryani.store.memory import MemoryStateStore
+from tokenbiryani.store.redis_store import RedisStateStore
 from tokenbiryani.store.sqlite import SqliteStateStore
 
 
-@pytest.fixture(params=["memory", "sqlite"])
+def fake_redis_store(server=None):
+    """A RedisStateStore over fakeredis, so the command usage is tested without a server."""
+    fakeredis = pytest.importorskip("fakeredis")
+    from fakeredis.aioredis import FakeRedis
+
+    server = server or fakeredis.FakeServer()
+    client = FakeRedis(server=server, decode_responses=True)
+    return RedisStateStore(client=client), server
+
+
+@pytest.fixture(params=["memory", "sqlite", "redis"])
 async def store(request, tmp_path):
     if request.param == "memory":
         made = MemoryStateStore()
-    else:
+    elif request.param == "sqlite":
         made = SqliteStateStore(str(tmp_path / "state.db"))
+    else:
+        made, _ = fake_redis_store()
     await made.startup()
     yield made
     await made.close()
@@ -169,3 +185,82 @@ async def test_a_cap_is_windowed_not_lifetime(mock, tmp_path):
     completion = await gateway.complete(body(), {}, capped)
     assert completion.status == 200
     await gateway.aclose()
+
+
+# ---- multi-instance: the point of the Redis backend ----------------------------
+
+async def test_two_instances_share_affinity_through_redis():
+    first, server = fake_redis_store()
+    second, _ = fake_redis_store(server)
+    await first.startup()
+    await second.startup()
+
+    await first.set_affinity("fp:conv", "acct-01", 600.0)
+    assert await second.get_affinity("fp:conv") == "acct-01", (
+        "a second instance must route the conversation to the same cache owner"
+    )
+    await first.close()
+    await second.close()
+
+
+async def test_two_instances_share_one_spend_cap():
+    """Without a shared ledger, two instances each enforce half a cap."""
+    first, server = fake_redis_store()
+    second, _ = fake_redis_store(server)
+    await first.startup()
+    await second.startup()
+
+    await first.add_spend(SCOPE_KEY, "default", 3.0)
+    await second.add_spend(SCOPE_KEY, "default", 4.0)
+    assert await first.get_spend(SCOPE_KEY, "default", 3600.0) == pytest.approx(7.0)
+    assert await second.get_spend(SCOPE_KEY, "default", 3600.0) == pytest.approx(7.0)
+    await first.close()
+    await second.close()
+
+
+async def test_two_gateways_share_a_pool_through_redis(mock):
+    """End to end: instance B honours the affinity instance A established."""
+    _, server = fake_redis_store()
+    config_a = make_config(["a", "b", "c"])
+    config_b = make_config(["a", "b", "c"])
+    store_a, _ = fake_redis_store(server)
+    store_b, _ = fake_redis_store(server)
+
+    first = build(mock, config_a)
+    first.store = store_a
+    second = build(mock, config_b)
+    second._client = mock.client(base_url="https://mock.anthropic.test")
+    second.store = store_b
+    await first.startup()
+    await second.startup()
+
+    key = KeyConfig(key="bir_test", name="default")
+    initial = await first.complete(body("shared conversation"), {}, key)
+    follow_up = await second.complete(body("shared conversation"), {}, key)
+
+    assert follow_up.event.account_id == initial.event.account_id
+    assert follow_up.event.affinity_honored
+    await first.aclose()
+    await second.aclose()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TOKENBIRYANI_REDIS_URL"),
+    reason="set TOKENBIRYANI_REDIS_URL to run against a real redis-server",
+)
+async def test_against_a_real_redis_server():
+    url = os.environ["TOKENBIRYANI_REDIS_URL"]
+    namespace = "tokenbiryani-test-" + uuid.uuid4().hex[:8]
+    store = RedisStateStore(url=url, namespace=namespace)
+    await store.startup()
+    try:
+        await store.set_affinity("fp:real", "acct-01", 60.0)
+        assert await store.get_affinity("fp:real") == "acct-01"
+        await store.add_spend(SCOPE_ACCOUNT, "acct-01", 2.5)
+        assert await store.get_spend(SCOPE_ACCOUNT, "acct-01", 3600.0) == pytest.approx(2.5)
+        assert await store.spend_by_scope(SCOPE_ACCOUNT, 3600.0) == {
+            "acct-01": pytest.approx(2.5)
+        }
+        assert await store.record_key_request("k", time.time()) == 1
+    finally:
+        await store.close()

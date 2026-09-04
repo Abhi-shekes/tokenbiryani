@@ -67,7 +67,7 @@ def build_store(config) -> StateStore:
 
         return SqliteStateStore(config.store.path)
     if backend == "redis":
-        from .redis import RedisStateStore
+        from .redis_store import RedisStateStore
 
         return RedisStateStore(config.store.url, config.store.namespace)
     raise ValueError(
