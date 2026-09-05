@@ -8,11 +8,29 @@ honestly when the whole pool is dry.
 ```bash
 pip install tokenbiryani          # or: pipx install tokenbiryani
 tokenbiryani init                 # writes tokenbiryani.yaml + a virtual key
-tokenbiryani serve                # then add your accounts at /console
+tokenbiryani serve                # starts with an empty pool
+tokenbiryani console              # opens the browser, already signed in
+```
 
+![The console's Overview screen: readiness, next reset, queue depth, cache hit rate and
+spend across the top, a capacity horizon below it, and every account in the pool with
+its headroom meters, p95, cache rate and spend](docs/images/console-overview.png)
+
+Nothing needs exporting first. The console's wizard takes your first credential,
+**verifies it** — the same rate-limit-header check `tokenbiryani doctor` performs — and
+hands you the two lines that use it, with a working key already in them:
+
+```bash
 export ANTHROPIC_BASE_URL=http://localhost:8787
-export ANTHROPIC_AUTH_TOKEN=bir_...   # printed by `init`
+export ANTHROPIC_AUTH_TOKEN=bir_...
 claude                            # Claude Code now runs through the pool
+```
+
+Prefer the terminal:
+
+```bash
+tokenbiryani accounts add work --api-key sk-ant-...   # probed before it is stored
+tokenbiryani accounts test                            # all of them, headers included
 ```
 
 No client changes. The gateway speaks the Messages API verbatim — it swaps the auth
@@ -169,6 +187,26 @@ there:
 - **Connect a client** — the exact export lines for this gateway's address.
 - **Keys** — mint and revoke virtual keys.
 
+![The Accounts screen: the pool, each account's state and where it was declared, its
+cost tier, priority and spend, with Test and Edit on every
+row](docs/images/console-accounts.png)
+
+Click an account and it opens: its limits, what its meters can and cannot tell you,
+where its credential came from, an error breakdown by class, and its own recent
+requests.
+
+![An account detail panel: a subscription account explaining that it reports
+rolling-window utilisation rather than per-window budgets, where its token file lives
+and when it expires, then state, requests, failures, p95, cache hit and spend, over its
+recent requests](docs/images/console-account-detail.png)
+
+Settings shows what the gateway is *currently running* — strategy and price table, each
+marked with where its value came from, and a Reload that re-reads the file.
+
+![The Settings screen: routing strategy and price table, both marked "from the file",
+with the bundled table's date beside it and live counts of accounts, queue depth and
+priced models](docs/images/console-settings.png)
+
 It is one server-rendered page plus a stylesheet, inside the package — no build step, no
 Node toolchain added to a `pipx install`. The shell carries no data and needs no key; it
 asks for an admin key on first load and keeps it in that browser only.
@@ -212,7 +250,6 @@ tokenbiryani status --json   # same data, for scripts
 | `POST /v1/messages` | Messages API, streaming and not |
 | `POST /v1/messages/count_tokens`, `GET /v1/models` | passthrough |
 | `GET /healthz` | 200 while any account is ready |
-| `GET /metrics` | Prometheus |
 | `GET /admin/status` | pool snapshot |
 | `GET /admin/usage` | bucketed usage history for the charts |
 | `POST /admin/accounts` · `PATCH` · `DELETE` · `POST /admin/accounts/{id}/test` | manage credentials at runtime |
@@ -240,6 +277,10 @@ curl -sX POST localhost:8787/admin/keys -H "x-api-key: $ADMIN_KEY" \
 curl -sX DELETE localhost:8787/admin/keys/tenant-1 -H "x-api-key: $ADMIN_KEY"
 ```
 
+![The Keys screen: a form minting a key with pool, rpm, spend cap, priority and admin
+flag, above a table of existing keys marked "in config" with their pools and
+limits](docs/images/console-keys.png)
+
 Minted keys are stored **hashed**, so a leaked state store is not a leaked key, and they
 live in the shared store — one instance honours a key another minted. Keys declared in
 the config file belong to the file: the API will not revoke them.
@@ -260,7 +301,12 @@ spill lane is an optimisation, never a dependency. Streaming requests never spil
 | `anthropic_api` | Anthropic API keys. The default. |
 | `bedrock` | AWS Bedrock. SigV4-signed; its binary event-stream is decoded back to SSE so the rest of the gateway sees ordinary streaming. Needs `pip install "tokenbiryani[bedrock]"`. |
 | `vertex` | Google Vertex AI. Bearer token from application-default credentials; returns real SSE already. Needs `pip install "tokenbiryani[vertex]"`. |
-| `oauth` | A Claude subscription (Max/Pro), added by logging in from the console. Read [docs/oauth.md](docs/oauth.md) first: subscription sessions send no rate-limit headers, so such an account loses headroom routing, leases and the capacity horizon — and the login stays disabled until you supply the provider endpoints, which this project will not guess at. |
+| `oauth` | A Claude subscription (Max/Pro). Three token sources, offered in the console's Add-account dialog: this machine's Claude Code login (nothing to configure), a long-lived token from `claude setup-token`, or an OAuth login the gateway runs itself — that last one stays disabled until you supply the provider endpoints, which this project will not guess at. Read [docs/oauth.md](docs/oauth.md) first: a subscription reports rolling-window utilisation rather than per-window budgets, so it keeps headroom routing and failover but has no leases, no admission control and no capacity horizon. |
+
+![The Add-account dialog for a Claude subscription: three token sources — this
+machine's Claude Code login, a long-lived token, or an OAuth login — with the machine
+scan listing each credentials file it found, its plan, and whether it is current or
+stale](docs/images/console-subscription-session.png)
 
 All four sit in one pool, so a request can fail over from an API key to Bedrock. Use
 `options.model_map` to translate your callers' model names into each platform's ids.
@@ -327,9 +373,13 @@ Needs the optional dependency: `pip install "tokenbiryani[redis]"`.
 
 ### Costs
 
-The gateway ships **no price list**. Costs are reported and spend caps enforced only for
-models you name under `pricing:` in the config. Baking prices into code would mean
-silently billing against stale numbers.
+Costs are reported, and spend caps enforced, only for models that have a price.
+`pricing: builtin` takes the dated table that ships with this release — the console
+shows its date beside every cost — and naming a model under `pricing:` overrides it.
+
+Prices live in a dated data file rather than in code, because the gateway must never
+bill you against a number nobody can attribute. A dated file whose date is on screen
+can be attributed; a dict compiled into a release cannot.
 
 ### Privacy and security
 
@@ -354,7 +404,7 @@ table and for what was deliberately left out.
 Working today: passthrough and streaming, multi-account pooling, the error taxonomy,
 retry and failover, the rate-limit mirror, token estimation and leases, headroom scoring,
 circuit breakers, session affinity and cache accounting, admission control and a bounded
-priority queue, virtual keys with model/pool/rpm/spend scoping, Prometheus metrics,
+priority queue, virtual keys with model/pool/rpm/spend scoping,
 structured logs, config hot reload, the admin API, and the CLI. Request priority with a
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
 and windowed spend, a Redis store for multi-instance deployments, and runtime key
@@ -366,11 +416,12 @@ suite, a reproducible benchmark, and an end-to-end smoke test over real sockets
 All eight milestones in `PLAN.md` are built. `docs/UI-DESIGN.md` is the console's design
 brief, and the console follows it.
 
-**Credential types.** Anthropic API keys are the supported path. Pooling Pro/Max
-*subscription* accounts runs against Anthropic's consumer terms, and those sessions
-expose no rate-limit headers — which would degrade the routing this project exists for
-into reactive backoff. The `Upstream` interface is open if you want to go there; nothing
-in this repo does.
+**Credential types.** Anthropic API keys are the supported path. A *subscription*
+account works — routing your own subscription through your own local gateway is the
+ordinary case, and it reports enough (rolling-window utilisation) to route on — but
+pooling several so their limits add up runs against Anthropic's consumer terms. Leases,
+admission control and the capacity horizon need absolute token counts and stay dark for
+those accounts. See [docs/oauth.md](docs/oauth.md).
 
 ## License
 

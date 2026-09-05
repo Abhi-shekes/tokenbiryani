@@ -5,12 +5,17 @@ which is what pooling more than one subscription requires. It can also come from
 credentials file or an environment variable — see `oauth_credentials` — for the case
 where something else already obtained it.
 
-**What an oauth account costs you:** every routing
-feature that distinguishes this project from a generic proxy is computed from
-`anthropic-ratelimit-*` response headers, and subscription sessions do not send them.
-Headroom routing, binding leases, admission control and the capacity horizon all go
-dark for these accounts; failover and prompt-cache affinity remain. That is why
-`observable_limits` is forced false for them rather than left to the operator.
+**What an oauth account costs you:** a subscription session does not send the
+`anthropic-ratelimit-{requests,input-tokens,output-tokens}-*` triples an API key
+does, so `observable_limits` is forced false rather than left to the operator — an
+account whose windows never populate would read as permanently full and win every
+routing comparison.
+
+It does send `anthropic-ratelimit-unified-*`: how much of the rolling 5-hour and
+7-day windows is spent. That is a real headroom number and the mirror reads it, so
+these accounts do get headroom-aware routing. What stays dark is anything needing an
+absolute token count: leases cannot reserve against a percentage, and the capacity
+horizon cannot plot one. Failover and prompt-cache affinity are unaffected.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 
 from ..config import AccountConfig
 from .base import Upstream
-from .oauth_credentials import TokenSource, build_source
+from .oauth_credentials import CredentialError, StaticToken, TokenSource, build_source
 
 #: Account options that name a token the gateway reads rather than owns. Any of
 #: these means "do not use a gateway-managed session for this account".
@@ -66,16 +71,25 @@ class OAuthUpstream(Upstream):
         self._source: Optional[TokenSource] = None
         if any(options.get(k) for k in EXTERNAL_SOURCE_OPTIONS):
             self._source = build_source(options)
+        elif config.api_key:
+            # A token pasted into the console — `claude setup-token` mints one that
+            # outlives a CLI session. It arrives in `api_key` rather than in options
+            # because that is the field the store encrypts and the admin API strips
+            # by name; a secret in `options` would be neither.
+            self._source = StaticToken(config.api_key)
         self._token_provider = token_provider
 
         if config.observable_limits:
-            # Not merely cosmetic: an account whose headroom always reads full wins
-            # every comparison against accounts reporting an honest partial budget,
-            # so it would absorb the whole pool's traffic and then start 429ing.
+            # Not merely cosmetic: an account whose classic windows never populate
+            # reads as full, wins every comparison against accounts reporting an
+            # honest partial budget, and absorbs the pool's traffic until it 429s.
+            # Its real budget arrives as unified utilisation, which the mirror reads
+            # whatever this flag says.
             logger.warning(
                 "account %r is an oauth account but observable_limits is true. "
-                "Subscription sessions send no anthropic-ratelimit-* headers, so its "
-                "headroom would read as permanently full. Forcing it false.",
+                "Subscription sessions send no per-window limit/remaining headers, so "
+                "its headroom would read as permanently full. Forcing it false — its "
+                "unified utilisation is read either way.",
                 config.id,
             )
             config.observable_limits = False
@@ -87,8 +101,10 @@ class OAuthUpstream(Upstream):
             return self._source.token()
         if self._token_provider is None:
             raise RuntimeError(
-                f"account {self.account_id!r} has no token: log in from the console, or "
-                "set options.credentials_path / options.token_env / options.access_token"
+                f"account {self.account_id!r} has no token: log in from the console, "
+                "point it at this machine's Claude Code session, paste a token from "
+                "`claude setup-token`, or set options.credentials_path / "
+                "options.token_env / options.access_token"
             )
         return self._token_provider()
 
@@ -96,6 +112,30 @@ class OAuthUpstream(Upstream):
         if self._source is not None:
             return self._source.describe()
         return "session held by the gateway"
+
+    def source_expiry(self) -> Optional[float]:
+        """When the token this account reads goes stale, if the source knows.
+
+        A credentials file states its own expiry, and showing it is the difference
+        between "this will stop working at 21:56 unless the CLI renews it" and a
+        401 nobody expected.
+        """
+        getter = getattr(self._source, "expires_at", None)
+        if getter is None:
+            return None
+        try:
+            return getter()
+        except CredentialError:
+            return None
+
+    @property
+    def source_kind(self) -> str:
+        """Which of the four token sources this account is using, for the console."""
+        if isinstance(self._source, StaticToken):
+            return "token"
+        if self._source is not None:
+            return "external"
+        return "login"
 
     def url(self, path: str) -> str:
         return self.base_url + "/" + path.lstrip("/")

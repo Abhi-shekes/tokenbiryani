@@ -35,8 +35,8 @@ def _fernet(key: bytes):
         from cryptography.fernet import Fernet
     except ImportError as exc:  # pragma: no cover - error path only
         raise SecretError(
-            "storing account credentials needs the cryptography package: "
-            "pip install 'tokenbiryani[secrets]'"
+            "storing account credentials needs the cryptography package, which is a "
+            "base dependency — reinstall with: pip install --upgrade tokenbiryani"
         ) from exc
     return Fernet(key)
 
@@ -49,8 +49,8 @@ def generate_key() -> bytes:
         from cryptography.fernet import Fernet
     except ImportError as exc:  # pragma: no cover - error path only
         raise SecretError(
-            "storing account credentials needs the cryptography package: "
-            "pip install 'tokenbiryani[secrets]'"
+            "storing account credentials needs the cryptography package, which is a "
+            "base dependency — reinstall with: pip install --upgrade tokenbiryani"
         ) from exc
 
     return Fernet.generate_key()

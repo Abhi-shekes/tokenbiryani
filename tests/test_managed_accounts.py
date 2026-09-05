@@ -118,15 +118,63 @@ async def test_duplicate_and_malformed_ids_are_refused(mock, tmp_path):
     await gateway.aclose()
 
 
-async def test_config_accounts_are_not_editable_by_the_api(mock, tmp_path):
+async def test_a_config_account_keeps_its_credential_and_its_place(mock, tmp_path):
+    """The console may change how a config account is used, never what it is."""
     gateway, _ = sqlite_gateway(mock, tmp_path)
     await gateway.startup()
-    with pytest.raises(GatewayError) as edit:
-        await gateway.update_account("acct-01", name="renamed")
-    assert edit.value.status == 409
+    with pytest.raises(GatewayError) as rotate:
+        await gateway.update_account("acct-01", api_key="sk-somebody-elses")
+    assert rotate.value.status == 409
+    with pytest.raises(GatewayError) as repoint:
+        await gateway.update_account("acct-01", base_url="https://elsewhere.test")
+    assert repoint.value.status == 409
+    # Still the file's account: it cannot be deleted through the API.
     with pytest.raises(GatewayError) as remove:
         await gateway.delete_account("acct-01")
     assert remove.value.status == 409
+    assert gateway.accounts["acct-01"].config.api_key == "key-acct-01"
+    await gateway.aclose()
+
+
+async def test_a_config_account_can_be_turned_off_from_the_console(mock, tmp_path):
+    """Disabling an account at 3am must not require an editor on the server."""
+    gateway, _ = sqlite_gateway(mock, tmp_path)
+    await gateway.startup()
+
+    updated = await gateway.update_account(
+        "acct-01", enabled=False, name="Paused", cost_tier=3.0
+    )
+    assert updated["enabled"] is False
+    assert gateway.accounts["acct-01"].config.enabled is False
+    assert gateway.accounts["acct-01"].config.name == "Paused"
+    assert gateway.accounts["acct-01"].config.cost_tier == 3.0
+    # The file still declares it, so the console can still say where it came from.
+    assert updated["source"] == "config"
+
+    # An override is stored, not written back to the file.
+    records = await gateway.store.list_accounts()
+    assert [r["id"] for r in records if r.get("kind") == "override"] == ["acct-01"]
+
+    cleared = await gateway.clear_override("acct-01")
+    assert cleared is True
+    assert gateway.accounts["acct-01"].config.enabled is True
+    assert gateway.accounts["acct-01"].config.name == ""
+    assert gateway.accounts["acct-01"].config.cost_tier == 1.0
+    await gateway.aclose()
+
+
+async def test_an_override_survives_a_config_reload(mock, tmp_path):
+    """Saving an unrelated line in the YAML must not silently re-enable an account."""
+    gateway, config = sqlite_gateway(mock, tmp_path)
+    await gateway.startup()
+    await gateway.update_account("acct-01", enabled=False)
+
+    gateway.reload(config)
+    assert gateway.accounts["acct-01"].config.enabled is False
+
+    await gateway.clear_override("acct-01")
+    gateway.reload(config)
+    assert gateway.accounts["acct-01"].config.enabled is True
     await gateway.aclose()
 
 
@@ -240,3 +288,139 @@ async def test_a_tenant_key_cannot_add_an_account(mock, tmp_path):
         )
     assert response.status_code == 403
     await gateway.aclose()
+
+
+# ---- test before storing, and the header check ---------------------------------
+# Storing first and testing second turned a typo into a `disabled` row somebody had
+# to find and delete. The probe below is what lets the console refuse a bad
+# credential without writing anything.
+
+
+async def test_an_unsaved_credential_can_be_probed(mock, tmp_path):
+    gateway, _ = sqlite_gateway(mock, tmp_path)
+    await gateway.startup()
+    mock.add("probe-me", "key-probe")
+
+    good = await gateway.probe_credential("key-probe", base_url=BASE_URL)
+    assert good["ok"] is True and good["status"] == 200
+
+    bad = await gateway.probe_credential("key-nonsense", base_url=BASE_URL)
+    assert bad["ok"] is False and bad["status"] == 401
+    assert bad["detail"], "and it says why"
+
+    assert "probe" not in gateway.accounts, "probing stores nothing"
+    assert await gateway.store.list_accounts() == []
+    await gateway.aclose()
+
+
+async def test_probing_over_http_leaks_no_headers_or_internals(mock, tmp_path):
+    gateway, config = sqlite_gateway(mock, tmp_path)
+    mock.add("probe-me", "key-probe")
+    app = create_app(config, gateway)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://gw"
+    ) as client:
+        response = await client.post(
+            "/admin/accounts/test",
+            headers=ADMIN,
+            json={"api_key": "key-probe", "base_url": BASE_URL},
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert "headers" not in payload, "the raw upstream headers are not the caller's"
+    assert "classification" not in payload
+
+
+async def test_diagnose_does_not_cry_wolf_before_any_traffic(mock, tmp_path):
+    """The failure mode this check nearly shipped with.
+
+    `GET /v1/models` carries no `anthropic-ratelimit-*` headers, so checking against
+    that probe reports all nine missing for a perfectly healthy account — told to
+    somebody who has just added their first one. "Not seen yet" is a third answer,
+    and it is the true one until a completion has been served.
+    """
+    gateway, _ = sqlite_gateway(mock, tmp_path)
+    await gateway.startup()
+    mock.add("acct-new", "key-added")
+    await gateway.create_account("acct-new", "Work", "key-added", base_url=BASE_URL)
+
+    report = await gateway.diagnose_account("acct-new")
+    assert report["ok"] is True, "the credential itself is fine"
+    assert report["limits_source"] == "not_observed"
+    assert report["limits"] is None, "and no verdict is invented from a header-free probe"
+    await gateway.aclose()
+
+
+async def test_diagnose_reports_the_headers_real_traffic_has_seen(mock, tmp_path, key):
+    """Once a completion has been served, the check has something true to read."""
+    gateway, _ = sqlite_gateway(mock, tmp_path)
+    await gateway.startup()
+    mock.add("acct-new", "key-added")
+    await gateway.create_account("acct-new", "Work", "key-added", base_url=BASE_URL)
+    # Take the config account out of the pool so the request has to land on the new
+    # one. It is the file's, so the API will not disable it; the runtime flag will.
+    gateway.accounts["acct-01"].config.enabled = False
+    await gateway.complete(body(), {}, key)
+
+    report = await gateway.diagnose_account("acct-new")
+    assert report["limits_source"] == "checked"
+    assert report["limits"]["ok"] is True, report["limits"]["missing"]
+    assert report["limits"]["parsed"]["input_tokens"]["limit"], "and it parsed them"
+    await gateway.aclose()
+
+
+async def test_diagnose_can_be_asked_to_spend_one_request(mock, tmp_path):
+    """The paid check: opt-in, never the default, because it costs money."""
+    gateway, _ = sqlite_gateway(mock, tmp_path)
+    await gateway.startup()
+    mock.add("acct-new", "key-added")
+    await gateway.create_account("acct-new", "Work", "key-added", base_url=BASE_URL)
+
+    completions = lambda: sum(  # noqa: E731 - a one-line predicate reads better here
+        1 for call in mock.calls if call["path"].endswith("/v1/messages")
+    )
+    before = completions()
+    assert (await gateway.diagnose_account("acct-new"))["limits_source"] == "not_observed"
+    assert completions() == before, "the free check sends no completion"
+
+    report = await gateway.diagnose_account("acct-new", spend=True)
+    assert report["limits_source"] == "checked"
+    assert report["limits"]["ok"] is True
+    assert completions() == before + 1, "the paid one sends exactly one"
+    await gateway.aclose()
+
+
+async def test_diagnose_holds_an_unobservable_account_to_no_such_standard(mock, tmp_path):
+    """A subscription session reports no limit headers by design, not by fault."""
+    gateway, _ = sqlite_gateway(mock, tmp_path)
+    await gateway.startup()
+    mock.add("acct-new", "key-added")
+    await gateway.create_account(
+        "acct-new", "Sub", "key-added", base_url=BASE_URL, observable_limits=False
+    )
+    report = await gateway.diagnose_account("acct-new", spend=True)
+    assert report["ok"] is True
+    assert report["observable"] is False
+    assert report["limits_source"] == "unobservable"
+    assert report["limits"] is None, "no verdict, because there is nothing to check"
+    await gateway.aclose()
+
+
+async def test_diagnose_names_a_header_that_is_spelled_differently(mock, tmp_path):
+    """The whole point of the check, forced by renaming one header on the way out."""
+    from tokenbiryani.core.diagnostics import inspect_headers
+
+    renamed = {
+        "anthropic-ratelimit-requests-limit": "1000",
+        "anthropic-ratelimit-requests-remaining": "999",
+        "anthropic-ratelimit-requests-reset": "2026-01-01T00:00:00Z",
+        # singular, as a real API drift would be
+        "anthropic-ratelimit-input-token-remaining": "99000",
+    }
+    report = inspect_headers(renamed, now=0.0)
+    assert report["ok"] is False
+    assert "anthropic-ratelimit-input-tokens-remaining" in report["missing"]
+    assert "round-robin" in report["consequence"], "and what it costs"
+    # The header that *did* arrive is reported, so the mismatch is diagnosable.
+    assert "anthropic-ratelimit-input-token-remaining" in report["returned"]

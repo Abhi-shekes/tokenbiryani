@@ -110,8 +110,9 @@ async def test_interactive_requests_are_served_before_batch(gateway_factory, moc
     assert order[0] == "interactive", "batch queued first but must yield"
 
 
-async def test_priority_appears_in_metrics(gateway_factory, mock, key):
+async def test_priority_is_recorded_on_the_request(gateway_factory, mock, key):
+    """It used to be asserted through a Prometheus label. The event log is where the
+    priority actually lives, and it is what the console and the usage history read."""
     gateway = gateway_factory(["a"])
     await gateway.complete(body(), {PRIORITY_HEADER: "batch"}, key)
-    rendered = gateway.metrics.render()
-    assert 'priority="batch"' in rendered
+    assert gateway.events.recent(1)[0]["priority"] == "batch"

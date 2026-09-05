@@ -21,6 +21,7 @@ class MemoryStateStore(StateStore):
         self._ledger: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
         self._keys: Dict[str, Dict[str, object]] = {}
         self._accounts: Dict[str, Dict[str, object]] = {}
+        self._settings: Dict[str, object] = {}
         self._usage: List[Dict[str, object]] = []
         self._lock = asyncio.Lock()
 
@@ -111,6 +112,14 @@ class MemoryStateStore(StateStore):
     async def list_accounts(self) -> List[Dict[str, object]]:
         async with self._lock:
             return [dict(record) for record in self._accounts.values()]
+
+    async def put_setting(self, name: str, value: object) -> None:
+        async with self._lock:
+            self._settings[str(name)] = value
+
+    async def get_settings(self) -> Dict[str, object]:
+        async with self._lock:
+            return dict(self._settings)
 
     def _sum(self, key: str, window_seconds: float) -> float:
         cutoff = time.time() - window_seconds

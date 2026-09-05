@@ -78,7 +78,7 @@ async def test_the_mock_window_rolls_so_countdowns_mean_something(mock):
     """A frozen reset timestamp makes every countdown in the console read 'now'."""
     import time
 
-    from tokenbiryani.testing.mock_upstream import MockAccount
+    from support.mock_upstream import MockAccount
 
     account = MockAccount(api_key="k", window_seconds=60.0)
     account.input_remaining = 5
@@ -147,3 +147,56 @@ def test_the_console_files_are_re_read_when_they_change(tmp_path, monkeypatch):
     path.write_text("second")
     os.utime(path, (time.time() + 2, time.time() + 2))
     assert dashboard.console_html() == "second", "a changed file is re-read"
+
+
+# ---- signing in from the terminal ---------------------------------------------
+# The console's first screen used to be a password field fed by copy-paste out of
+# scrollback. `tokenbiryani console` replaces that with a handoff, and the property
+# that makes the handoff safe is that the ticket — not the key — is what travels.
+
+
+async def test_a_ticket_is_exchanged_for_the_key_exactly_once(mock):
+    async with client_for(mock) as client:
+        minted = await client.post(
+            "/admin/console-ticket", headers={"x-api-key": "bir_test"}
+        )
+        assert minted.status_code == 200
+        ticket = minted.json()["ticket"]
+
+        first = await client.post("/admin/console-session", json={"ticket": ticket})
+        assert first.status_code == 200
+        assert first.json()["key"] == "bir_test"
+
+        replayed = await client.post("/admin/console-session", json={"ticket": ticket})
+        assert replayed.status_code == 401, "a spent ticket is worth nothing"
+
+
+async def test_a_ticket_needs_an_admin_key_to_mint(mock):
+    async with client_for(mock) as client:
+        assert (await client.post("/admin/console-ticket")).status_code == 401
+        rejected = await client.post(
+            "/admin/console-ticket", headers={"x-api-key": "bir_wrong"}
+        )
+        assert rejected.status_code == 401
+
+
+async def test_no_ticket_is_minted_for_a_gateway_the_network_can_reach(mock):
+    """A ticket is a bearer token in a URL. That is only ever acceptable on loopback."""
+    config = make_config(["a"])
+    config.server.host = "0.0.0.0"
+    config.server.allow_remote = True
+    app = create_app(config, build(mock, config))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://gw"
+    ) as client:
+        response = await client.post(
+            "/admin/console-ticket", headers={"x-api-key": "bir_test"}
+        )
+    assert response.status_code == 403
+    assert "loopback" in response.json()["error"]["message"]
+
+
+async def test_an_unknown_ticket_is_refused(mock):
+    async with client_for(mock) as client:
+        response = await client.post("/admin/console-session", json={"ticket": "made-up"})
+    assert response.status_code == 401

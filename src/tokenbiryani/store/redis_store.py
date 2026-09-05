@@ -177,6 +177,19 @@ class RedisStateStore(StateStore):
                 continue
         return sorted(records, key=lambda r: str(r.get("id", "")))
 
+    async def put_setting(self, name: str, value: Any) -> None:
+        await self.client.hset(self._key("settings"), str(name), json.dumps(value))
+
+    async def get_settings(self) -> Dict[str, Any]:
+        raw = await self.client.hgetall(self._key("settings"))
+        out: Dict[str, Any] = {}
+        for name, value in (raw or {}).items():
+            try:
+                out[str(name)] = json.loads(value)
+            except ValueError:
+                continue
+        return out
+
     async def spend_by_scope(self, scope: str, window_seconds: float) -> Dict[str, float]:
         names = await self.client.smembers(self._key("spend-names", scope))
         totals: Dict[str, float] = {}

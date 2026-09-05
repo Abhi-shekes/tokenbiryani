@@ -11,9 +11,10 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 )
 
+from support.mock_upstream import MockAnthropic  # noqa: E402
+
 from tokenbiryani.config import Config, KeyConfig  # noqa: E402
 from tokenbiryani.core.gateway import Gateway  # noqa: E402
-from tokenbiryani.testing.mock_upstream import MockAnthropic  # noqa: E402
 
 BASE_URL = "https://mock.anthropic.test"
 

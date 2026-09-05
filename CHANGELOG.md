@@ -30,12 +30,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 **State**
 - `StateStore` with `memory`, `sqlite` and `redis` backends, held to identical
   behaviour by one parametrised suite.
+- Operator settings persist across restarts (`put_setting`/`get_settings`), so a
+  strategy chosen in the console is still in force after a deploy.
 - Spend is a windowed ledger rather than a lifetime total, and survives a restart.
 
 **Console**
 - Account lifecycle in the UI: add, name, test, rename, rotate, enable, disable and
-  delete accounts of any type without touching the config file. Accounts declared in
-  `tokenbiryani.yaml` render locked — the file stays the operator's.
+  delete accounts of any type without touching the config file.
+- Accounts declared in `tokenbiryani.yaml` can be operated from the console without
+  being overwritten by it. The file keeps the credential, the type and the base URL;
+  `enabled`, `name`, `cost_tier`, `priority`, `spend_cap_usd`, `models` and
+  `max_concurrency` can be changed here, are stored in the gateway rather than
+  written back to the file, survive a reload, and are undone in one step
+  (`DELETE /admin/accounts/{id}/override`). Turning an account off no longer requires
+  an editor on the server.
+- Keys can be rescoped in place (`PATCH /admin/keys/{name}`) instead of revoked and
+  reissued, which breaks every client holding them. Nullable limits can be cleared.
+  The common case is a key scoped at a since-deleted account, which blocks reload.
+- Routing strategy and price table are editable on the Settings screen. Both are
+  stored in the state store, re-applied after every reload — so an unrelated edit to
+  the YAML cannot silently revert them — and tagged with where the current value came
+  from, the file or the console.
 - Add-account form per credential type: Anthropic API key, Claude subscription,
   Bedrock, Vertex.
 - Usage screen: persisted history over 1h / 24h / 7d / 30d, grouped by account, model
@@ -45,8 +60,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint to point clients at, and the admin-key field, rather than a bare box.
 - A drawn mark — a sealed, layered pot — replacing the emoji, legible down to a 16px
   favicon where the emoji was not.
-- First-run wizard replaces the copy-this-YAML empty state.
+- First-run wizard replaces the copy-this-YAML empty state: a full page with a
+  four-step rail, and each step does its own work rather than opening a dialog.
+  Step 1 offers the credential routes as cards and leads with the Claude Code
+  logins found on this machine; step 2 mounts the account form inline and names a
+  subscription account after the profile directory it reads. Reachable again from
+  **Add an account** in the sidebar, not only on an empty pool.
 - Rebuilt on a sidebar shell; the stylesheet is served from `/console.css`.
+
+### Removed
+
+**Console**
+- Row density toggle. One control, one stored preference and a second spacing scale
+  to keep working, for a setting nobody was reaching for.
 
 **Usage history**
 - `usage_events`: one row per request — tokens, cache split, model, key, status,
@@ -57,8 +83,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 **Subscription accounts**
 - `type: oauth` in core, with an OAuth 2.0 + PKCE login driven from the console and
-  background session refresh. Ships inert: the provider endpoints are unset by
-  default and the flow says which are missing. See ADR-0004 and docs/oauth.md.
+  background session refresh. That login ships inert: the provider endpoints are
+  unset by default and the flow says which are missing. See ADR-0004 and
+  docs/oauth.md.
+- Two token sources that need nothing configured, offered beside it in the
+  Add-account dialog: **this machine's Claude Code login**, read from the CLI's
+  credentials file and re-read whenever the CLI refreshes it, and **a long-lived
+  token** from `claude setup-token`, encrypted at rest like any other credential.
+  A subscription is now something you can add from the console on a fresh install.
+- `GET /admin/oauth/detect` scans for Claude Code logins and reports path,
+  subscription type and expiry — never the token. It covers `$CLAUDE_CONFIG_DIR`,
+  `~/.claude`, every `~/.claude-*` profile directory and `~/.config/claude`, which
+  is how two accounts actually live on one machine: a config directory each, picked
+  by a shell alias. It exists because `CLAUDE_CONFIG_DIR` makes
+  `~/.claude/.credentials.json` a *different account* whose token may have expired
+  weeks ago, and the 401 that follows names neither file.
+- Rolling-window rate limits. A subscription reports
+  `anthropic-ratelimit-unified-{5h,7d}-{status,utilization,reset}` rather than the
+  per-window triples an API key sends, and the mirror now reads them: these accounts
+  route on `1 - utilization` instead of a fixed `assumed_headroom` guess, refuse when
+  a window says `rejected`, count down to a real reset, and draw **5h**/**7d** meters
+  in the console. Leases, admission control and the capacity horizon still need
+  absolute token counts and remain off for them. `doctor` and the console's verify
+  step check the unified headers for these accounts rather than reporting nine
+  missing ones on a healthy account.
 
 **Operations**
 - `tokenbiryani doctor`: sends one real request and reports the rate-limit headers the
@@ -66,15 +114,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `scripts/dev.sh` brings up the mock upstream and the gateway together.
 - Virtual keys with model, pool, rpm, spend and priority scoping; runtime minting and
   revocation, stored hashed, behind an `admin: true` boundary.
-- Prometheus metrics, structured logs that never contain prompts, and an admin API
-  with a per-request routing inspector.
+- Structured logs that never contain prompts, and an admin API with a per-request
+  routing inspector.
 - Config hot reload that preserves the health of accounts that survive it.
 - CLI: `init`, `serve`, `status`, `strategies`, `keygen`, `doctor`.
 
 **Testing**
 - Scriptable mock Anthropic upstream, usable in-process or as a real server, which
   models the per-credential prompt cache and can add latency to force real overlap.
-- 203 tests, including a lease-concurrency suite, at 85% coverage.
+- 378 tests, including a lease-concurrency suite and browser tests driving the
+  console through Playwright, at 85% coverage.
 - `benchmarks/cache_affinity.py`, with a regression test that fails if sticky routing
   ever stops beating cache-blind routing.
 - End-to-end smoke test over real sockets.
@@ -96,6 +145,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documentation site, code of conduct, issue and PR templates.
 
 ### Fixed
+- The bundled price table is keyed by prefix (`claude-sonnet-5*`). Its keys were exact
+  model ids, and the API answers with dated ones (`claude-haiku-4-5-20251001`), so
+  every request priced as `null` and the cost column stayed empty on a correctly
+  configured gateway.
+- The Settings screen no longer discards a choice made while it was still loading. It
+  repaints when the load returns, and read its values from the DOM at save time — so a
+  dropdown changed in that window saved the old value and reported success.
 - Re-enabling an account now clears its `disabled_reason` and resets its breaker.
   Previously the toggle read "on" while the account stayed out of the pool.
 - `/admin/status` refreshes managed accounts, so an account added elsewhere appears
@@ -107,11 +163,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docker/tokenbiryani.yaml` is in the repository. An unanchored `tokenbiryani.yaml`
   ignore rule matched it at every depth, so the file `docker compose up` mounts was
   never committed and a fresh clone could not start the stack.
-- The compose stack demonstrates the thing the project is about. Its mock upstream
-  now models the per-credential prompt cache (`--cache` on
-  `tokenbiryani.testing.server`), and `docker/tokenbiryani.yaml` carries illustrative
-  pricing — so cache hit rate and cost read as real numbers instead of a flat 0% and
-  a column of $0.0000 on the gateway's own demo stack.
 - `serve` bounds its graceful shutdown. This gateway always holds a connection that
   never ends — `/admin/events` is an SSE stream open for as long as a console tab is
   — so a reload or a restart hung at "Waiting for connections to close" with the port

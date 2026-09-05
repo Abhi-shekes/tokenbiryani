@@ -22,11 +22,24 @@ A file that fails to parse is rejected and the running config is kept.
 
 ## Prices
 
-The gateway ships **no price list**. Costs are reported, and spend caps enforced, only
-for models named under `pricing:`:
+Costs are reported, and spend caps enforced, only for models that have a price. Two
+ways to give them one.
+
+**The table that ships with this release**, dated:
+
+```yaml
+pricing: builtin
+```
+
+The Settings screen shows its `as_of` date beside every cost, so a stale table is
+visible rather than silent. Check the current numbers at
+[anthropic.com/pricing](https://anthropic.com/pricing).
+
+**Your own**, which always wins:
 
 ```yaml
 pricing:
+  builtin: true          # optional — start from the shipped table
   claude-opus-4-*:
     input: 15.0
     output: 75.0
@@ -34,8 +47,13 @@ pricing:
     cache_write: 18.75
 ```
 
-USD per million tokens. Baking prices into code would mean silently billing you
-against numbers that went stale in a release.
+USD per million tokens. Prices live in a dated data file rather than in code for the
+reason they always did: the gateway must never bill you against a number nobody can
+attribute. A dated file the console shows the date of can be attributed. A dict
+compiled into a release cannot.
+
+Without either, every cost reads `—`, and the Usage screen says so rather than
+drawing an empty chart.
 
 ## Spend caps are windowed
 

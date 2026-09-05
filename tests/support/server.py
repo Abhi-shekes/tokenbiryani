@@ -4,7 +4,7 @@ The in-process transport covers unit tests; this exists so the gateway can be sm
 tested end to end over real sockets, and so contributors can point a running gateway
 at a fake Anthropic without spending money.
 
-    python -m tokenbiryani.testing.server --port 9911 --accounts key-a,key-b
+    python -m support.server --port 9911 --accounts key-a,key-b
 """
 
 from __future__ import annotations
@@ -63,6 +63,22 @@ def create_mock_app(mock: Optional[MockAnthropic] = None) -> Starlette:
         )
 
     async def models(request: Request) -> Response:
+        """Authenticated, and deliberately header-free.
+
+        Both halves matter. Accepting any key here made a smoke run report a bad
+        credential as accepted, because the gateway probes this endpoint to test one.
+
+        And no `anthropic-ratelimit-*` headers, because the real endpoint carries
+        none: a mock that emitted them here would hide the fact that the rate-limit
+        check cannot be answered from a free probe, which is the whole reason the
+        check reports "not observed yet" as its own outcome.
+        """
+        if mock.by_key(request.headers.get("x-api-key", "")) is None:
+            return JSONResponse(
+                {"type": "error",
+                 "error": {"type": "authentication_error", "message": "invalid x-api-key"}},
+                status_code=401,
+            )
         return JSONResponse({"data": [{"id": "claude-test-1", "type": "model"}]})
 
     app = Starlette(

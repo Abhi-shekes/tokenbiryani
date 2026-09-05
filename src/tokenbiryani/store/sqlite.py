@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS managed_accounts (
     record  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    name    TEXT PRIMARY KEY,
+    value   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS usage_events (
     at                    REAL NOT NULL,
     account_id            TEXT NOT NULL,
@@ -283,6 +288,29 @@ class SqliteStateStore(StateStore):
         def query(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
             rows = conn.execute("SELECT record FROM managed_accounts ORDER BY id").fetchall()
             return [json.loads(row[0]) for row in rows]
+
+        return await self._run(query)
+
+    async def put_setting(self, name: str, value: Any) -> None:
+        def write(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                "INSERT INTO settings (name, value) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+                (str(name), json.dumps(value)),
+            )
+            conn.commit()
+
+        await self._run(write)
+
+    async def get_settings(self) -> Dict[str, Any]:
+        def query(conn: sqlite3.Connection) -> Dict[str, Any]:
+            out: Dict[str, Any] = {}
+            for name, value in conn.execute("SELECT name, value FROM settings"):
+                try:
+                    out[name] = json.loads(value)
+                except ValueError:
+                    continue
+            return out
 
         return await self._run(query)
 

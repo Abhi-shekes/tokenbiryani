@@ -86,6 +86,17 @@ class StateStore(abc.ABC):
     async def list_accounts(self) -> List[Dict[str, object]]:
         ...
 
+    async def put_setting(self, name: str, value: object) -> None:
+        """Persist one operator setting made from the console.
+
+        Not abstract: a store predating this method keeps working, it just forgets
+        the setting at restart, which is a degradation and not a crash.
+        """
+        return None
+
+    async def get_settings(self) -> Dict[str, object]:
+        return {}
+
     async def startup(self) -> None:
         return None
 

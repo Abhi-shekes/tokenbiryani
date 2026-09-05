@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-density="comfortable">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -103,8 +103,6 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
     <span>Self-hosted. Real credentials never leave this process.</span>
     <span class="lp-dot">·</span>
     <span>Anthropic-compatible on <span class="mono">/v1/messages</span></span>
-    <span class="lp-dot">·</span>
-    <span>Prometheus on <span class="mono">/metrics</span></span>
   </footer>
 </div>
 
@@ -112,7 +110,7 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
      First run: no accounts. The activation funnel, not an empty table.
      ========================================================================= -->
 <div id="onboarding" class="onboard hidden">
-  <div class="box">
+  <aside class="wiz-rail">
     <div class="brand">
       <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
         <path d="M6 10.5h20v10.5a6 6 0 01-6 6h-8a6 6 0 01-6-6V10.5z" stroke="currentColor"
@@ -120,11 +118,25 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
         <path d="M4.5 6.5h23M11 16.5h10M11 21.5h10" stroke="var(--accent)"
           stroke-width="2.8" stroke-linecap="round"/>
       </svg>
-      <span><b>tokenbiryani</b><span>let's get one account in</span></span>
+      <span><b>tokenbiryani</b><span>setup</span></span>
     </div>
-    <div class="steps" id="ob-steps"><i class="on"></i><i></i><i></i></div>
-    <div id="ob-body"></div>
-  </div>
+
+    <!-- Filled by renderSteps(). Static markup would have to repeat the titles
+         that the step functions already own. -->
+    <nav class="wiz-steps" id="ob-steps" aria-label="Setup steps"></nav>
+
+    <div class="wiz-foot">
+      <span class="addr" id="ob-addr"></span>
+      <div class="row">
+        <button class="chip" id="ob-theme">Theme</button>
+        <button class="chip" id="ob-skip">Skip setup</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="wiz-main">
+    <div class="wiz-body" id="ob-body"></div>
+  </main>
 </div>
 
 <!-- ============================================================================
@@ -172,6 +184,12 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
           stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v14h16V5z"/><path d="M9 9h6M9 13h6"/></svg>
         Connect a client</button>
+      <!-- Not a tab: it leaves the console for the wizard, so it carries no
+           data-tab and the tab handler skips it. -->
+      <button id="nav-setup">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        Add an account</button>
       <button data-tab="settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
           stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
@@ -182,7 +200,6 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
       <div class="status" id="live"><i></i><span id="live-text">connecting</span></div>
       <div class="row">
         <button class="chip" id="theme">Theme</button>
-        <button class="chip" id="density" title="Row density">Density</button>
       </div>
       <button class="chip" id="signout">Sign out</button>
     </div>
@@ -262,6 +279,7 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
         <div class="card">
           <header>
             <h3>Pool</h3>
+            <button class="btn" id="acct-test-all">Test all</button>
             <button class="btn primary" id="acct-add">Add account</button>
           </header>
           <div class="scroll" id="accounts-table"></div>
@@ -313,6 +331,7 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
           <header><h3>Configuration</h3>
             <span class="note">accounts added here are stored in the gateway; the YAML file is re-read on demand</span></header>
           <div class="pad stack">
+            <div id="settings-edit" class="stack"></div>
             <div class="row"><button class="btn" id="reload">Reload config file</button></div>
             <div id="reload-result"></div>
             <div class="kv" id="settings"></div>
@@ -327,14 +346,19 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
 
 <script>
 "use strict";
-const KEY_STORE = "tokenbiryani.key", THEME_STORE = "tokenbiryani.theme",
-      DENSITY_STORE = "tokenbiryani.density";
+const KEY_STORE = "tokenbiryani.key", THEME_STORE = "tokenbiryani.theme";
 const el = (id) => document.getElementById(id);
 
 const state = {
   key: "", tab: "pool", snapshot: null, requests: [], streaming: false,
-  stopStream: null, timer: null, ticker: null, onboardStep: 0,
+  stopStream: null, timer: null, ticker: null, onboardStep: 0, wizardOpen: false, poolEmpty: true,
   usage: null, window: "24h", groupBy: "account", oauthConfig: null,
+  //: Which of OAUTH_MODES the add-account dialog is on, and what the machine scan
+  //: found. Cached per dialog, not per session: a login can happen while it is open.
+  oauthMode: "session", oauthDetect: null, keys: [], settings: null,
+  //: A client key minted during onboarding. Held for the session only — it is
+  //: stored hashed, so this is the one place it exists after it is created.
+  mintedKey: "",
   //: offline = the gateway is not answering at all, as opposed to refusing us.
   offline: false, pollDelay: 5000, streamDelay: 2500, streamTimer: null, open: false,
   //: name -> categorical slot, assigned once and never reassigned, so a range
@@ -368,11 +392,11 @@ const ACCOUNT_TYPES = {
   },
   oauth: {
     label: "Claude subscription (Max / Pro)",
-    login: true,
-    blurb: "Signs in with your Claude subscription instead of an API key. Subscription " +
-           "sessions report no rate-limit headers, so this account gets failover and " +
-           "prompt-cache affinity but no headroom routing, no admission control and no " +
-           "capacity horizon.",
+    subscription: true,
+    blurb: "Uses your Claude subscription instead of an API key. A subscription reports " +
+           "how much of its 5-hour and 7-day windows is spent, so this account still " +
+           "gets headroom-aware routing and failover — what it cannot have is leases " +
+           "and the capacity horizon, which need absolute token counts.",
     fields: [],
   },
   bedrock: {
@@ -392,6 +416,33 @@ const ACCOUNT_TYPES = {
       { name: "opt.project", label: "GCP project", placeholder: "my-project", required: true },
       { name: "opt.region", label: "Region", placeholder: "us-central1" },
     ],
+  },
+};
+
+/* Three ways an account gets a subscription token, in the order they are worth
+   trying. The first needs nothing typed at all; the last needs three endpoint
+   values Anthropic does not publish, which is why it is no longer the only door. */
+const OAUTH_MODES = {
+  session: {
+    label: "This machine's Claude Code login",
+    tag: "nothing to paste",
+    blurb: "The gateway reads the token the Claude Code CLI already wrote, and re-reads " +
+           "it whenever the CLI refreshes it. No endpoints to configure, no token to " +
+           "rotate — but it only works while something keeps that file current.",
+  },
+  token: {
+    label: "A long-lived token",
+    tag: "survives a logout",
+    blurb: "Run <span class=\"mono\">claude setup-token</span> and paste what it prints. " +
+           "Encrypted before it is stored, and it does not depend on any file staying " +
+           "fresh. This is the one to use in a container.",
+  },
+  login: {
+    label: "Log in with Claude",
+    tag: "one session per account",
+    blurb: "The gateway runs the OAuth flow itself and holds a session per account, " +
+           "renewing it before it lapses. This is what pooling more than one " +
+           "subscription needs — and it is the one that needs oauth.* configured.",
   },
 };
 
@@ -530,7 +581,13 @@ function renderStats(snapshot) {
   const pool = snapshot.pool, stats = snapshot.stats;
   const cooling = pool.cooling, disabled = pool.disabled;
   el("stats").innerHTML = [
-    ["Ready now", tokens(pool.ready_input_tokens) + "<small> tok</small>",
+    // A pool of subscriptions has no token count to add up — its budget is a
+    // percentage of a rolling window. Showing "0 tok" for a pool that is 77%
+    // available was the wrong kind of honest.
+    ["Ready now",
+      pool.ready_input_tokens || pool.ready_headroom == null
+        ? tokens(pool.ready_input_tokens) + "<small> tok</small>"
+        : pct(pool.ready_headroom) + "<small> headroom</small>",
       `${pool.ready} of ${pool.total} accounts`, ""],
     ["Next reset", countdown(pool.next_reset_seconds), "earliest window", ""],
     ["Queue", String(snapshot.queue.depth), "max " + snapshot.queue.max_size,
@@ -573,8 +630,36 @@ function meter(label, window) {
     <span class="v">${pct(window.fraction)}${absolute}</span></span>`;
 }
 
-const meters = (limits) => `<span class="meter">${meter("req", limits.requests)}` +
-  `${meter("in", limits.input_tokens)}${meter("out", limits.output_tokens)}</span>`;
+/** A rolling window a subscription reports: spent, not remaining.
+ *
+ *  Drawn on the same scale as the others so the two kinds of account can be
+ *  compared down a column — the bar is headroom either way. */
+function unifiedMeter(label, window) {
+  if (!window || window.headroom == null) {
+    return `<span class="bar"><span class="k">${label}</span>
+      <span class="track"></span><span class="v dm">—</span></span>`;
+  }
+  const kind = window.headroom > 0.25 ? "ready" : window.headroom > 0.05 ? "cool" : "crit";
+  const width = Math.max(2, Math.round(window.headroom * 100));
+  return `<span class="bar" title="${esc(label)} window ${pct(window.utilization)} used">
+    <span class="k">${label}</span>
+    <span class="track"><i style="width:${width}%;background:var(--${kind})"></i></span>
+    <span class="v">${pct(window.headroom)}</span></span>`;
+}
+
+/** A subscription reports its two rolling windows; an API key reports three
+ *  budgets. Showing empty req/in/out bars for a subscription used to read as a
+ *  fault, when in fact the account had told us exactly how much was left. */
+const meters = (limits) => limits.unified_known
+  ? `<span class="meter">${unifiedMeter("5h", (limits.unified || {})["5h"])}` +
+    `${unifiedMeter("7d", (limits.unified || {})["7d"])}</span>`
+  : `<span class="meter">${meter("req", limits.requests)}` +
+    `${meter("in", limits.input_tokens)}${meter("out", limits.output_tokens)}</span>`;
+
+/** When this account's headroom next moves, whichever kind of window it reports. */
+const resetIn = (limits) => limits.unified_known
+  ? ((limits.unified || {})["5h"] || {}).reset_in
+  : limits.input_tokens.reset_in;
 
 /** Latency sparkline built from request history — no extra endpoint needed. */
 function sparkline(accountId) {
@@ -597,8 +682,12 @@ function sparkline(accountId) {
 
 /** Name first, id second: the id is the stable handle, the name is what you called it. */
 function identity(account) {
-  const blind = account.limits.observable === false
-    ? ' <span class="pill muted" title="this upstream reports no rate-limit headers"><i></i>no limits</span>' : "";
+  // "no limits" is only true when nothing was reported at all. A subscription
+  // reporting unified utilisation has limits; they are just a different shape.
+  const blind = account.limits.observable === false && !account.limits.unified_known
+    ? ' <span class="pill muted" title="this upstream reports no rate-limit headers"><i></i>no limits</span>'
+    : account.limits.unified_known
+    ? ' <span class="pill accent" title="reports rolling 5h and 7d utilisation"><i></i>rolling</span>' : "";
   const named = account.name && account.name !== account.id;
   return `<span class="aid"><span class="nm">${esc(account.name || account.id)}${blind}</span>
     <span class="sub">${named ? esc(account.id) + " · " : ""}${esc(account.type)}</span></span>`;
@@ -608,6 +697,20 @@ function statePill(account) {
   const cooling = account.state === "cooling" && account.cooling_for != null
     ? " " + clock(account.cooling_for) : "";
   return `<span class="pill ${esc(account.state)}"><i></i>${esc(account.state)}${cooling}</span>`;
+}
+
+/** The Enabled column. It works for config accounts too now: the toggle stores an
+ *  override in the gateway rather than editing the file, which is the difference
+ *  between turning an account off at 3am and opening an editor on the server. The
+ *  file still owns the credential, and the hover text says where the change lives. */
+function enabledToggle(account, managed) {
+  const button = `<button class="tog ${account.enabled === false ? "" : "on"}"
+    data-toggle="${esc(account.id)}"
+    aria-label="${account.enabled === false ? "disabled" : "enabled"}"><i></i></button>`;
+  if (managed) return button;
+  const why = `${account.id} is declared in tokenbiryani.yaml. Turning it off here is `
+    + "stored in the gateway, not written to the file — Revert puts the file back in charge";
+  return `<span class="held" title="${esc(why)}">${button}</span>`;
 }
 
 function renderAccounts(snapshot) {
@@ -620,7 +723,7 @@ function renderAccounts(snapshot) {
       <td>${identity(a)}</td>
       <td>${statePill(a)}</td>
       <td>${meters(a.limits)}</td>
-      <td class="r">${countdown(a.limits.input_tokens.reset_in)}</td>
+      <td class="r">${countdown(resetIn(a.limits))}</td>
       <td class="r mono">${a.inflight}</td>
       <td class="r mono">${a.p95_latency == null ? "—" : a.p95_latency.toFixed(2) + "s"}</td>
       <td class="r">${sparkline(a.id)}</td>
@@ -635,9 +738,16 @@ function renderHorizon(horizon) {
   if (!series.length || series.every((p) => !p.input_tokens)) {
     el("hz").innerHTML = "";
     el("hzx").innerHTML = "";
-    el("hznote").innerHTML =
-      "<span>No account reports a budget the gateway can project. " +
-      "The horizon needs <b>anthropic-ratelimit-*</b> headers.</span>";
+    // Distinguish "told us nothing" from "told us a percentage": a subscription
+    // reports its budget as utilisation, which routes fine and plots not at all.
+    const rolling = ((state.snapshot || {}).accounts || [])
+      .some((a) => a.limits && a.limits.unified_known);
+    el("hznote").innerHTML = rolling
+      ? "<span>This pool's budget is a share of a rolling window, not a token " +
+        "count, so there is nothing to project. Headroom still routes — see the " +
+        "<b>5h</b> and <b>7d</b> meters below.</span>"
+      : "<span>No account reports a budget the gateway can project. " +
+        "The horizon needs <b>anthropic-ratelimit-*</b> headers.</span>";
     return;
   }
   // Scale to a little above the peak: a plot filled edge to edge reads as "maxed
@@ -867,6 +977,8 @@ const displayName = (name) =>
 
 /** Wire hover + keyboard focus on a plot. Tooltips enhance; the table carries all. */
 function attachTips(root, buckets, describe) {
+  // A chart that was replaced by an explanation has no plot to hang tips on.
+  if (!root) return;
   const tip = document.createElement("div");
   tip.className = "tip hidden";
   root.appendChild(tip);
@@ -941,6 +1053,9 @@ function renderUsage() {
   const groups = cappedGroups(usage.groups);
   const overall = usage.overall;
   const windowSeconds = usage.window_seconds;
+  // An unpriced pool draws an empty cost chart, which reads as "nothing was spent"
+  // rather than "nothing was priced". Say which, and how to fix it.
+  const priced = ((state.snapshot || {}).pricing || {}).models > 0;
 
   // Fold anything past the eighth series into a single "Other" bucket so the
   // charts and the table agree about what is on screen.
@@ -1006,7 +1121,12 @@ function renderUsage() {
 
     <div class="card"><header><h3>Cost</h3>
       <span class="note">per bucket, in USD</span></header>
-      <div class="pad plot" id="u-cost"></div></div>
+      ${priced ? `<div class="pad plot" id="u-cost"></div>`
+        : `<div class="empty"><b>No prices configured</b>
+           Costs are reported, and spend caps enforced, only for models that have a
+           price. Add <span class="mono">pricing: builtin</span> to
+           <span class="mono">tokenbiryani.yaml</span> for the dated table that ships
+           with this release, then press <b>Reload config file</b> on Settings.</div>`}</div>
 
     <div class="card"><header><h3>Cache hit rate</h3>
       <span class="note">the number that decides the bill</span></header>
@@ -1030,9 +1150,11 @@ function renderUsage() {
   attachTips(el("u-tokens"), plotted,
     (bucket) => bucketTip(bucket, groups, "billed_input_tokens", tokens));
 
-  el("u-cost").innerHTML = lineChart(
-    plotted, (b) => (b.all.requests ? b.all.cost_usd : null), usd,
-    windowSeconds, "var(--series-1)", { tickFormat: usdAxis });
+  if (priced) {
+    el("u-cost").innerHTML = lineChart(
+      plotted, (b) => (b.all.requests ? b.all.cost_usd : null), usd,
+      windowSeconds, "var(--series-1)", { tickFormat: usdAxis });
+  }
   attachTips(el("u-cost"), plotted, (bucket) =>
     `<b>${esc(fullTime(bucket.at))}</b><div class="tr"><span class="nm">cost</span>
      <span class="v">${esc(usd(bucket.all.cost_usd))}</span></div>
@@ -1193,17 +1315,22 @@ function renderAccountsAdmin(snapshot) {
         <td class="click" data-open="${esc(a.id)}">${identity(a)}</td>
         <td>${statePill(a)}</td>
         <td>${managed ? '<span class="pill accent"><i></i>managed</span>'
-          : '<span class="pill muted" title="declared in tokenbiryani.yaml — edit it there"><i></i>in config</span>'}</td>
+          : `<span class="pill muted" title="declared in tokenbiryani.yaml"><i></i>in config</span>${
+            (a.overridden || []).length
+              ? ` <span class="pill cooling" title="changed here, not in the file: ${
+                  esc((a.overridden || []).join(", "))}"><i></i>edited</span>` : ""}`}</td>
         <td class="r mono">${a.cost_tier}</td>
         <td class="r mono">${a.priority}</td>
         <td class="r mono">${usd(a.spend_usd)}</td>
-        <td class="r"><button class="tog ${a.enabled === false ? "" : "on"}"
-          ${managed ? "" : "disabled"} data-toggle="${esc(a.id)}"
-          aria-label="${a.enabled === false ? "disabled" : "enabled"}"><i></i></button></td>
+        <td class="r">${enabledToggle(a, managed)}</td>
         <td class="r"><span class="acts">
+          ${a.state === "disabled" && managed
+            ? `<button class="btn sm primary" data-fix="${esc(a.id)}">Fix</button>` : ""}
           <button class="btn sm" data-test="${esc(a.id)}">Test</button>
-          ${managed ? `<button class="btn sm" data-edit="${esc(a.id)}">Edit</button>
-            <button class="btn sm danger" data-del="${esc(a.id)}">Delete</button>` : ""}
+          <button class="btn sm" data-edit="${esc(a.id)}">Edit</button>
+          ${managed ? `<button class="btn sm danger" data-del="${esc(a.id)}">Delete</button>`
+            : (a.overridden || []).length
+              ? `<button class="btn sm" data-revert="${esc(a.id)}">Revert</button>` : ""}
         </span></td></tr>`;
     }).join("")}</tbody></table></div>`;
 
@@ -1212,12 +1339,63 @@ function renderAccountsAdmin(snapshot) {
     n.addEventListener("click", () => openAccount(n.dataset.open)));
   wrap.querySelectorAll("[data-test]").forEach((n) =>
     n.addEventListener("click", () => testAccount(n.dataset.test, n)));
+  wrap.querySelectorAll("[data-fix]").forEach((n) =>
+    n.addEventListener("click", () => fixAccount(n.dataset.fix)));
   wrap.querySelectorAll("[data-edit]").forEach((n) =>
     n.addEventListener("click", () => accountModal(findAccount(n.dataset.edit))));
   wrap.querySelectorAll("[data-del]").forEach((n) =>
     n.addEventListener("click", () => deleteAccount(n.dataset.del)));
   wrap.querySelectorAll("[data-toggle]").forEach((n) =>
     n.addEventListener("click", () => toggleAccount(n.dataset.toggle, !n.classList.contains("on"))));
+  wrap.querySelectorAll("[data-revert]").forEach((n) =>
+    n.addEventListener("click", () => revertOverride(n.dataset.revert)));
+}
+
+/** Test every account in one pass.
+ *
+ *  The natural action after restoring a backup or rotating keys, and it used to be
+ *  N clicks with no summary at the end. */
+async function testAllAccounts(button) {
+  const accounts = ((state.snapshot || {}).accounts || []);
+  if (!accounts.length) return;
+  if (button) { button.disabled = true; button.textContent = "Testing…"; }
+  const failures = [];
+  try {
+    for (const account of accounts) {
+      try {
+        const result = await api(
+          "/admin/accounts/" + encodeURIComponent(account.id) + "/test",
+          { method: "POST" });
+        if (!result.ok) failures.push(account.id + ": " + result.detail);
+      } catch (error) {
+        failures.push(account.id + ": " + error.message);
+      }
+    }
+    acctMsg(failures.length
+      ? `<div class="note err"><span><b>${failures.length} of ${accounts.length}</b>
+          could not be used:<br>${failures.map(esc).join("<br>")}</span></div>`
+      : `<div class="note ok">All ${accounts.length} accounts answered.</div>`);
+    refresh();
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Test all"; }
+  }
+}
+
+/** A disabled account is the one state that needs a person. Open its editor on the
+ *  credential, with the reason it stopped stated above the field — rather than
+ *  making them find the row, read the pill, and guess which field to change. */
+async function fixAccount(id) {
+  const account = findAccount(id);
+  if (!account) return;
+  // Awaited: the modal is built asynchronously now, so the fields do not exist
+  // until it resolves.
+  await accountModal(account);
+  const field = document.querySelector('#m-fields [data-field="api_key"]');
+  if (field) field.focus();
+  el("m-msg").innerHTML = `<div class="note err"><span><b>${esc(id)}</b> is disabled:
+    <b>${esc(account.disabled_reason || "unknown")}</b>. This does not self-heal.
+    Paste a working credential and save — the account is re-enabled when it is
+    accepted.</span></div>`;
 }
 
 const findAccount = (id) =>
@@ -1253,6 +1431,16 @@ async function toggleAccount(id, enabled) {
   } catch (error) { acctMsg(`<div class="note err">${esc(error.message)}</div>`); }
 }
 
+/** Hand a config account back to the file. */
+async function revertOverride(id) {
+  if (!window.confirm(`Revert ${id} to what tokenbiryani.yaml says?`)) return;
+  try {
+    await api("/admin/accounts/" + encodeURIComponent(id) + "/override", { method: "DELETE" });
+    acctMsg(`<div class="note ok"><b>${esc(id)}</b> is back to what the config file says.</div>`);
+    refresh();
+  } catch (error) { acctMsg(`<div class="note err">${esc(error.message)}</div>`); }
+}
+
 async function deleteAccount(id) {
   if (!window.confirm(`Delete ${id}? Its credential is removed from the gateway.`)) return;
   try {
@@ -1283,95 +1471,215 @@ function typeFields(type, account) {
   }).join("");
 }
 
+/** Slugify a name into an account id, then make it unique against the pool.
+ *
+ *  This exists so the ID field has a value the moment the name does. It used to be
+ *  required and empty, which made "An account needs an ID." the most likely first
+ *  thing a new user saw — an error for not having invented `acct-02`. `_SAFE_ID`
+ *  on the server is what this targets: letters, digits, dashes, underscores. */
+function idFromName(name) {
+  const base = String(name || "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  if (!base) return "";
+  const taken = new Set(((state.snapshot || {}).accounts || []).map((a) => a.id));
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 100; n++) {
+    if (!taken.has(base + "-" + n)) return base + "-" + n;
+  }
+  return base;
+}
+
+/** Recognise a pasted credential and select the type it belongs to.
+ *
+ *  One fewer dropdown to understand on a first run: the shape of what you pasted
+ *  already says which upstream it is. Returns "" when nothing is recognisable,
+ *  which leaves whatever the operator chose alone. */
+function typeOfCredential(text) {
+  const value = String(text || "").trim();
+  if (!value) return "";
+  if (/^sk-ant-/.test(value)) return "anthropic_api";
+  if (/^(AKIA|ASIA)[A-Z0-9]{12,}/.test(value)) return "bedrock";
+  if (/^arn:aws:/.test(value)) return "bedrock";
+  if (/"type"\s*:\s*"service_account"/.test(value)) return "vertex";
+  return "";
+}
+
 /**
  * One modal for create and edit. `account` present means edit, in which case the
  * id and the type are fixed — changing either is a different account.
+ *
+ * Laid out as essentials first, everything else folded away. Twelve fields of which
+ * two matter on a first run is an admin form doing an onboarding job; the admin
+ * fields are still one click away, and open by default when editing, because that
+ * is when they are the point.
  */
-function accountModal(account) {
-  const editing = !!account;
+/**
+ * The account form, with no shell around it.
+ *
+ * Mounted two ways: inside the dialog on the Accounts screen, and inside the
+ * first-run wizard as the whole of step 2. One set of fields, one set of IDs,
+ * one place to fix — a wizard that forked this form would drift from it, and
+ * the field that went missing would be the credential.
+ */
+function accountFormBody(account, editing, heldByFile) {
   const type = editing ? account.type : "anthropic_api";
-  el("modal-root").innerHTML = `<div class="scrim" id="scrim">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="${editing ? "Edit" : "Add"} account">
-      <header><h3>${editing ? "Edit " + esc(account.name || account.id) : "Add an account"}</h3>
-        <button class="btn ghost sm" id="m-x">Close</button></header>
-      <div class="pad">
-        <label class="f">Type
-          <select id="m-type" ${editing ? "disabled" : ""}>
-            ${Object.keys(ACCOUNT_TYPES).map((k) =>
-              `<option value="${k}" ${k === type ? "selected" : ""}>${esc(ACCOUNT_TYPES[k].label)}</option>`).join("")}
-          </select>
-          <span class="hint" id="m-blurb"></span></label>
+  return `<div class="pad">
+    <label class="f">Type
+      <select id="m-type" ${editing ? "disabled" : ""}>
+        ${Object.keys(ACCOUNT_TYPES).map((k) =>
+          `<option value="${k}" ${k === type ? "selected" : ""}>${
+            esc(ACCOUNT_TYPES[k].label)}</option>`).join("")}
+      </select>
+      <span class="hint" id="m-blurb"></span></label>
 
-        <div class="grid g2">
-          <label class="f">Name
-            <input id="m-name" placeholder="Work account" value="${esc(account ? (account.name || "") : "")}">
-            <span class="hint">What you call it. Shown everywhere.</span></label>
+    <label class="f">Name
+      <input id="m-name" placeholder="Work account" value="${esc(account ? (account.name || "") : "")}">
+      <span class="hint">What you call it. Shown everywhere.</span></label>
+
+    <div id="m-fields" class="grid g2"></div>
+    <div id="m-login" class="hidden stack"></div>
+
+    <div id="m-credentials" class="stack">
+      <details class="adv" ${editing ? "open" : ""}>
+        <summary>Advanced</summary>
+        <div class="stack">
           <label class="f">ID
             <input id="m-id" placeholder="acct-02" ${editing ? "disabled" : ""}
               value="${esc(account ? account.id : "")}">
-            <span class="hint">Stable handle used in logs and metrics.</span></label>
+            <span class="hint">Stable handle used in logs and metrics. Filled in
+              from the name; change it before you save or not at all.</span></label>
+          <div class="grid g3">
+            <label class="f">Cost tier
+              <input id="m-tier" type="number" step="0.1" value="${account ? account.cost_tier : 1}">
+              <span class="hint">Lower drains first under cost_tiered.</span></label>
+            <label class="f">Priority
+              <input id="m-pri" type="number" step="1" value="${account ? account.priority : 0}"></label>
+            <label class="f">Spend cap USD
+              <input id="m-cap" type="number" step="0.01" placeholder="none"
+                value="${account && account.spend_cap_usd != null ? account.spend_cap_usd : ""}"></label>
+          </div>
+          <label class="f">Models
+            <input id="m-models" placeholder="*"
+              value="${esc(account ? [].concat(account.models || ["*"]).join(", ") : "")}">
+            <span class="hint">Comma separated. <code>*</code> or blank means every
+              model.</span></label>
         </div>
+      </details>
+    </div>
 
-        <div id="m-fields" class="grid g2"></div>
-        <div id="m-login" class="hidden stack"></div>
+    <div id="m-msg"></div>
+  </div>
+`;
+}
 
-        <div id="m-credentials" class="stack">
-        <div class="grid g3">
-          <label class="f">Cost tier
-            <input id="m-tier" type="number" step="0.1" value="${account ? account.cost_tier : 1}">
-            <span class="hint">Lower drains first under cost_tiered.</span></label>
-          <label class="f">Priority
-            <input id="m-pri" type="number" step="1" value="${account ? account.priority : 0}"></label>
-          <label class="f">Spend cap USD
-            <input id="m-cap" type="number" step="0.01" placeholder="none"
-              value="${account && account.spend_cap_usd != null ? account.spend_cap_usd : ""}"></label>
-        </div>
+function accountFormFooter(editing) {
+  return `<footer>
+    <button class="btn ghost" id="m-cancel">Cancel</button>
+    <button class="btn" id="m-save">${editing ? "Save without testing" : "Add without testing"}</button>
+    <button class="btn primary" id="m-save-test">${editing ? "Test and save" : "Test and add"}</button>
+    <button class="btn primary hidden" id="m-start-login">Log in with Claude</button>
+  </footer>
+`;
+}
 
-        <label class="f">Models
-          <input id="m-models" placeholder="*"
-            value="${esc(account ? [].concat(account.models || ["*"]).join(", ") : "")}">
-          <span class="hint">Comma separated. <code>*</code> or blank means every model.</span></label>
-        </div>
-
-        <div id="m-msg"></div>
-      </div>
-      <footer>
-        <button class="btn ghost" id="m-cancel">Cancel</button>
-        <button class="btn" id="m-save-test">${editing ? "Save" : "Add"} &amp; test</button>
-        <button class="btn primary" id="m-save">${editing ? "Save" : "Add account"}</button>
-        <button class="btn primary hidden" id="m-start-login">Log in with Claude</button>
-      </footer>
-    </div></div>`;
-
+/** Everything the mounted form needs to behave. `onClose` is what Cancel does:
+ *  dismiss the dialog, or step back in the wizard. */
+function wireAccountForm(account, editing, heldByFile, onClose) {
   const paintType = () => {
     const chosen = el("m-type").value;
     const spec = ACCOUNT_TYPES[chosen];
-    el("m-fields").innerHTML = spec.login ? "" : typeFields(chosen, account);
+    const subscription = !!spec.subscription;
+    el("m-fields").innerHTML = subscription || heldByFile ? "" : typeFields(chosen, account);
     el("m-blurb").textContent = spec.blurb;
-    // A subscription is signed into, not typed in. Everything that belongs to a
-    // credential form is hidden, and the footer becomes a login button.
-    el("m-login").classList.toggle("hidden", !spec.login);
-    el("m-credentials").classList.toggle("hidden", !!spec.login);
-    el("m-save").classList.toggle("hidden", !!spec.login);
-    el("m-save-test").classList.toggle("hidden", !!spec.login);
-    el("m-start-login").classList.toggle("hidden", !spec.login);
-    if (spec.login) loadOauthConfig();
+    // A subscription has no API key field: where its token comes from is a choice
+    // between three sources, so that choice replaces the credential form.
+    el("m-login").classList.toggle("hidden", !subscription);
+    // The advanced block is cost tier, models and the like — as useful for a
+    // subscription as for a key, so it stays. Only the credential fields go.
+    if (heldByFile) {
+      el("m-login").classList.remove("hidden");
+      el("m-login").innerHTML = `<div class="note info"><span>
+        <b>${esc(account.id)}</b> is declared in tokenbiryani.yaml. Its credential,
+        type and base URL belong to the file. Changing the name, tier, priority, cap
+        or models here is stored in the gateway and survives a reload — press
+        <b>Revert</b> on the Accounts screen to hand it back to the file.</span></div>`;
+      el("m-save").classList.remove("hidden");
+      el("m-save-test").classList.remove("hidden");
+      el("m-start-login").classList.add("hidden");
+    } else if (subscription) paintOauthMode(editing);
+    else {
+      el("m-save").classList.remove("hidden");
+      el("m-save-test").classList.remove("hidden");
+      el("m-start-login").classList.add("hidden");
+    }
   };
   paintType();
   el("m-type").addEventListener("change", paintType);
-  el("m-x").addEventListener("click", closeModal);
-  el("m-cancel").addEventListener("click", closeModal);
-  el("scrim").addEventListener("click", (e) => { if (e.target.id === "scrim") closeModal(); });
-  document.addEventListener("keydown", function onEsc(e) {
-    if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", onEsc); }
-  });
+
+  if (!editing) {
+    // The ID follows the name until somebody types an ID of their own, at which
+    // point it stops — a field that overwrites what you typed into it is worse
+    // than one you have to fill in.
+    let idIsOurs = true;
+    el("m-id").addEventListener("input", () => { idIsOurs = false; });
+    el("m-name").addEventListener("input", () => {
+      if (idIsOurs) el("m-id").value = idFromName(el("m-name").value);
+    });
+  }
+
+  el("m-cancel").addEventListener("click", onClose);
   el("m-save").addEventListener("click", () => saveAccount(account, false));
   el("m-save-test").addEventListener("click", () => saveAccount(account, true));
+
+  // Paste a credential and the type follows it, unless the operator already chose
+  // one that disagrees — in which case they meant it.
+  const credential = document.querySelector('#m-fields [data-field="api_key"]');
+  if (credential && !editing) {
+    credential.addEventListener("input", () => {
+      const guess = typeOfCredential(credential.value);
+      if (guess && guess !== el("m-type").value) {
+        el("m-type").value = guess;
+        paintType();
+      }
+    });
+  }
   // onclick, not addEventListener: step two *replaces* this handler with
   // finishLogin. An added listener would survive and re-run startLogin on the same
   // click, wiping the code field the operator just pasted into.
   el("m-start-login").onclick = startLogin;
   (el("m-name") || {}).focus && el("m-name").focus();
+}
+
+/** Shared prep: the dialog and the wizard both need to know whether
+ *  subscription login is possible before they draw the choice. */
+async function prepAccountForm() {
+  state.oauthMode = "session";
+  if (state.oauthConfig === null) {
+    try { state.oauthConfig = await api("/admin/oauth/config"); }
+    catch (error) { state.oauthConfig = { configured: false, missing: [] }; }
+  }
+}
+
+async function accountModal(account) {
+  const editing = !!account;
+  //: The file keeps this account's credential, type and base URL. What is left is
+  //: what an operator changes under pressure, so those fields are the whole form.
+  const heldByFile = editing && account.source === "config";
+  await prepAccountForm();
+  el("modal-root").innerHTML = `<div class="scrim" id="scrim">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${editing ? "Edit" : "Add"} account">
+      <header><h3>${editing ? "Edit " + esc(account.name || account.id) : "Add an account"}</h3>
+        <button class="btn ghost sm" id="m-x">Close</button></header>
+      ${accountFormBody(account, editing, heldByFile)}
+      ${accountFormFooter(editing)}
+    </div></div>`;
+
+  wireAccountForm(account, editing, heldByFile, closeModal);
+  el("m-x").addEventListener("click", closeModal);
+  el("scrim").addEventListener("click", (e) => { if (e.target.id === "scrim") closeModal(); });
+  document.addEventListener("keydown", function onEsc(e) {
+    if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", onEsc); }
+  });
 }
 
 function collectAccount(editing) {
@@ -1388,7 +1696,7 @@ function collectAccount(editing) {
     payload.id = el("m-id").value.trim();
     payload.type = el("m-type").value;
   }
-  document.querySelectorAll("#m-fields [data-field]").forEach((input) => {
+  document.querySelectorAll("#m-fields [data-field], #m-login [data-field]").forEach((input) => {
     const raw = input.value.trim();
     const name = input.dataset.field;
     if (name.startsWith("opt.")) {
@@ -1401,16 +1709,48 @@ function collectAccount(editing) {
   return payload;
 }
 
+/**
+ * Save, optionally testing the credential first.
+ *
+ * The order matters and it used to be the other way round: store, then test. A
+ * typo'd key then became a `disabled` row somebody had to find and delete. Testing
+ * first means a wrong key is a message in this dialog and nothing else, and the
+ * operator can still overrule it — "Add without testing" is right there.
+ */
 async function saveAccount(account, alsoTest) {
   const editing = !!account;
   const payload = collectAccount(editing);
   if (!editing && !payload.id) {
-    el("m-msg").innerHTML = '<div class="note err">An account needs an ID.</div>';
+    // Only reachable now by clearing a filled-in ID, so it says how to get one back.
+    el("m-msg").innerHTML = `<div class="note err">An account needs an ID. Type a name
+      and one is filled in for you, or set it under Advanced.</div>`;
     return;
   }
   const buttons = ["m-save", "m-save-test"].map(el);
-  buttons.forEach((b) => { b.disabled = true; });
+  buttons.forEach((b) => { if (b) b.disabled = true; });
+  const done = () => buttons.forEach((b) => { if (b) b.disabled = false; });
+
   try {
+    const type = payload.type || (account || {}).type;
+    if (alsoTest && (payload.api_key || type === "oauth")) {
+      el("m-msg").innerHTML = '<div class="note info"><span>Testing the credential…</span></div>';
+      const probe = await api("/admin/accounts/test", {
+        method: "POST",
+        body: JSON.stringify({
+          api_key: payload.api_key, type: type,
+          base_url: payload.base_url, options: payload.options,
+        }),
+      });
+      if (!probe.ok) {
+        el("m-msg").innerHTML = `<div class="note err"><span>The upstream rejected this
+          credential${probe.status ? " (" + probe.status + ")" : ""}:
+          <b>${esc(probe.detail)}</b><br>Nothing was saved. Fix it, or use
+          <b>${editing ? "Save" : "Add"} without testing</b> if you know better.</span></div>`;
+        done();
+        return;
+      }
+    }
+
     const id = editing ? account.id : payload.id;
     if (editing) {
       await api("/admin/accounts/" + encodeURIComponent(id),
@@ -1419,15 +1759,115 @@ async function saveAccount(account, alsoTest) {
       await api("/admin/accounts", { method: "POST", body: JSON.stringify(payload) });
     }
     closeModal();
-    acctMsg(`<div class="note ok"><b>${esc(id)}</b> ${editing ? "saved" : "added"}.</div>`);
+    acctMsg(`<div class="note ok"><b>${esc(id)}</b> ${editing ? "saved" : "added"}${
+      alsoTest ? ", credential accepted" : ""}.</div>`);
+    // Claim step 2 before refreshing: the pool is no longer empty, and refresh()
+    // hands the screen back to the console unless the wizard has said it is not done.
+    const onboarding = state.onboardStep > 0;
+    if (onboarding) state.onboardStep = 2;
     await refresh();
-    if (alsoTest) await testAccount(id, null);
-    if (state.onboardStep) finishOnboarding(id);
+    if (onboarding) verifyOnboarding(id);
   } catch (error) {
     el("m-msg").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
   } finally {
-    buttons.forEach((b) => { if (b) b.disabled = false; });
+    done();
   }
+}
+
+// ---- subscription accounts ---------------------------------------------------
+
+/** Draw the token-source picker, then the panel for whichever source is chosen.
+ *
+ *  Editing never shows the picker: changing where an account's token comes from is
+ *  not an edit to that account, it is a different account. Delete and re-add.
+ */
+function paintOauthMode(editing) {
+  const panel = el("m-login");
+  if (editing) {
+    const detail = (findAccount((el("m-id") || {}).value) || {}).token_source_detail;
+    panel.innerHTML = `<div class="note info"><span>Subscription account${
+      detail ? ", token from " + esc(detail) : ""}. To change where its token comes
+      from, delete it and add it again — everything below still applies.</span></div>`;
+    el("m-save").classList.remove("hidden");
+    el("m-save-test").classList.remove("hidden");
+    el("m-start-login").classList.add("hidden");
+    return;
+  }
+  const mode = state.oauthMode;
+  panel.innerHTML = `<div class="seg" role="tablist" aria-label="where the token comes from">
+      ${Object.keys(OAUTH_MODES).map((key) => `<button type="button" role="tab"
+        class="segb ${key === mode ? "on" : ""}" data-mode="${key}"
+        aria-selected="${key === mode}">${esc(OAUTH_MODES[key].label)}
+        <span class="segt">${esc(OAUTH_MODES[key].tag)}</span></button>`).join("")}
+    </div>
+    <div class="hint">${OAUTH_MODES[mode].blurb}</div>
+    <div id="m-mode-body" class="stack"></div>`;
+
+  panel.querySelectorAll("[data-mode]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.oauthMode = button.dataset.mode;
+      paintOauthMode(false);
+    }));
+
+  // Only the login flow uses the footer's login button; the other two save an
+  // account like any other, credential probe included.
+  const login = mode === "login";
+  el("m-save").classList.toggle("hidden", login);
+  el("m-save-test").classList.toggle("hidden", login);
+  el("m-start-login").classList.toggle("hidden", !login);
+
+  if (mode === "login") loadOauthConfig();
+  else if (mode === "token") paintTokenMode();
+  else paintSessionMode();
+}
+
+function paintTokenMode() {
+  el("m-mode-body").innerHTML = `<label class="f">Access token
+      <input type="password" data-field="api_key" autocomplete="off"
+        placeholder="sk-ant-oat01-…">
+      <span class="hint">From <span class="mono">claude setup-token</span>. Encrypted
+        before it is stored, and never shown again.</span></label>`;
+}
+
+/** The scan: which Claude Code logins this machine has, and which one is current.
+ *
+ *  Offering a path field alone would be honest and useless — the failure it invites
+ *  is pointing at ~/.claude when CLAUDE_CONFIG_DIR says the real login is somewhere
+ *  else, and the 401 that follows names neither file.
+ */
+async function paintSessionMode() {
+  const body = el("m-mode-body");
+  body.innerHTML = '<div class="skel" style="height:76px"></div>';
+  if (state.oauthDetect === null) {
+    try { state.oauthDetect = (await api("/admin/oauth/detect")).candidates || []; }
+    catch (error) { state.oauthDetect = []; }
+  }
+  const found = state.oauthDetect.filter((c) => c.exists);
+  const usable = found.filter((c) => c.has_token && !c.expired);
+  const chosen = (usable[0] || found[0] || {}).path || "";
+
+  body.innerHTML = `${found.length ? found.map((c) => `<label class="pick">
+      <input type="radio" name="m-cred" value="${esc(c.path)}"
+        ${c.path === chosen ? "checked" : ""}>
+      <span class="pickb">
+        <span class="pickt">${esc(c.path)}
+          ${c.subscription ? `<span class="pill accent"><i></i>${esc(c.subscription)}</span>` : ""}
+          ${c.has_token && !c.expired ? '<span class="pill ready"><i></i>current</span>'
+            : '<span class="pill muted"><i></i>stale</span>'}</span>
+        <span class="picks">${esc(c.detail)}${c.expires_at
+          ? " · expires " + esc(new Date(c.expires_at * 1000).toLocaleString()) : ""}</span>
+      </span></label>`).join("")
+    : `<div class="note warn"><span>No Claude Code login found on this machine. Run
+        <span class="mono">claude</span> once and sign in, then reopen this dialog —
+        or paste the path below if it lives somewhere unusual.</span></div>`}
+    <label class="f">Credentials file
+      <input data-field="opt.credentials_path" id="m-cred-path" value="${esc(chosen)}"
+        placeholder="~/.claude/.credentials.json">
+      <span class="hint">What the gateway will read. It re-reads this file whenever it
+        changes, so a token the CLI refreshes is picked up without a restart.</span></label>`;
+
+  body.querySelectorAll('input[name="m-cred"]').forEach((radio) =>
+    radio.addEventListener("change", () => { el("m-cred-path").value = radio.value; }));
 }
 
 // ---- subscription login ------------------------------------------------------
@@ -1435,11 +1875,11 @@ async function saveAccount(account, alsoTest) {
 // start (get the authorize URL) then complete (hand the code back with a key).
 
 async function loadOauthConfig() {
-  const panel = el("m-login");
+  const panel = el("m-mode-body") || el("m-login");
   if (!panel) return;
   panel.innerHTML = '<div class="skel" style="height:52px"></div>';
   try {
-    const config = await api("/admin/oauth/config");
+    const config = state.oauthConfig || await api("/admin/oauth/config");
     state.oauthConfig = config;
     if (!config.configured) {
       // Say exactly what is missing rather than failing on the button press.
@@ -1455,9 +1895,7 @@ async function loadOauthConfig() {
     panel.innerHTML = `<div class="note info"><span>You will be sent to Claude to
       authorize this gateway${config.manual
         ? ", then paste the code it shows you back here"
-        : ", and returned here automatically"}.<br>
-      Subscription sessions report no rate limits, so this account will show empty
-      meters — that is expected, not a fault.</span></div>`;
+        : ", and returned here automatically"}.</span></div>`;
   } catch (error) {
     panel.innerHTML = `<div class="note err">${esc(error.message)}</div>`;
   }
@@ -1479,7 +1917,7 @@ async function startLogin() {
     // Opened rather than navigated to: navigating away would lose the pending
     // login, which lives in this page's memory until the code comes back.
     window.open(started.authorize_url, "_blank", "noopener");
-    el("m-login").innerHTML = `<div class="note info"><span>A Claude tab is open.
+    (el("m-mode-body") || el("m-login")).innerHTML = `<div class="note info"><span>A Claude tab is open.
       Authorize the gateway, then paste the code below.<br>
       If the tab did not open, <a href="${esc(started.authorize_url)}"
       target="_blank" rel="noopener">use this link</a>.</span></div>
@@ -1515,13 +1953,48 @@ async function finishLogin(loginState) {
     closeModal();
     acctMsg(`<div class="note ok"><b>${esc(record.id)}</b> signed in. Its session will
       be renewed automatically before it expires.</div>`);
+    const onboarding = state.onboardStep > 0;
+    if (onboarding) state.onboardStep = 2;
     await refresh();
-    if (state.onboardStep) finishOnboarding(record.id);
+    if (onboarding) verifyOnboarding(record.id);
   } catch (error) {
     el("m-msg").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
   } finally {
     button.disabled = false;
   }
+}
+
+/** Where this subscription's token comes from, and what that means for it lapsing.
+ *
+ *  Three sources, three different answers. Telling a credentials-file account that
+ *  "there is no refresh token, so it cannot be renewed" was true of a session the
+ *  gateway holds and false — and alarming — of one the CLI keeps current.
+ */
+function subscriptionNote(account) {
+  const expiry = account.token_expires_at || account.session_expires_at;
+  const when = expiry ? esc(new Date(expiry * 1000).toLocaleString()) : "";
+  const stale = expiry ? expiry * 1000 <= Date.now() : false;
+
+  if (account.token_source === "external") {
+    return `<div class="note ${stale ? "warn" : "info"}"><span>Token read from
+      ${esc(account.token_source_detail)}${when ? ", valid until " + when : ""}.
+      ${stale
+        ? "It has expired. Run <span class=\"mono\">claude</span> once to renew it — the "
+          + "gateway picks the new one up without a restart."
+        : "The gateway re-reads that file whenever it changes, so a token the CLI "
+          + "refreshes is picked up without a restart."}</span></div>`;
+  }
+  if (account.token_source === "token") {
+    return `<div class="note info"><span>Long-lived token, stored encrypted. It does
+      not depend on any file staying fresh${when ? ", and is valid until " + when : ""}.
+      Replace it by editing this account.</span></div>`;
+  }
+  return `<div class="note ${account.can_refresh ? "info" : "warn"}">
+    <span>Subscription session${when ? ", expires " + when : " with no stated expiry"}.
+    ${account.can_refresh
+      ? "It is renewed automatically before it lapses."
+      : "There is no refresh token, so it cannot be renewed — log in again when it lapses."}
+    </span></div>`;
 }
 
 // ---- account detail ----------------------------------------------------------
@@ -1536,17 +2009,14 @@ async function openAccount(id) {
       <div class="pad stack">
         ${account.disabled_reason ? `<div class="note err">Disabled: ${esc(account.disabled_reason)}.
           This does not self-heal — fix the credential, then press Test.</div>` : ""}
-        ${account.observable_limits === false ? `<div class="note info"><span>This upstream reports no
+        ${account.limits.unified_known ? `<div class="note info"><span>This account reports
+          rolling-window utilisation (<b>anthropic-ratelimit-unified-*</b>) rather than
+          per-window budgets, so its meters show real headroom but the capacity horizon
+          — which needs absolute token counts — leaves it out.</span></div>`
+          : account.observable_limits === false ? `<div class="note info"><span>This upstream reports no
           <b>anthropic-ratelimit-*</b> headers, so its meters and the capacity horizon stay
           empty and routing falls back to reactive backoff.</span></div>` : ""}
-        ${account.type === "oauth" ? `<div class="note ${account.can_refresh ? "info" : "warn"}">
-          <span>Subscription session${account.session_expires_at
-            ? ", expires " + esc(new Date(account.session_expires_at * 1000).toLocaleString())
-            : " with no stated expiry"}.
-          ${account.can_refresh
-            ? "It is renewed automatically before it lapses."
-            : "There is no refresh token, so it cannot be renewed — log in again when it lapses."}
-          </span></div>` : ""}
+        ${account.type === "oauth" ? subscriptionNote(account) : ""}
         <div class="kv">
           <div><span class="lb">State</span><span class="vl">${statePill(account)}</span></div>
           <div><span class="lb">Requests</span><span class="vl">${num(account.requests_total)}</span></div>
@@ -1561,10 +2031,13 @@ async function openAccount(id) {
           `<div><span class="lb">${esc(k)}</span><span class="vl">${v}</span></div>`).join("")}</div>` : ""}
         <div class="row">
           <button class="btn" data-test="${esc(account.id)}">Test credential</button>
+          <button class="btn" data-edit="${esc(account.id)}">Edit</button>
           ${account.source === "managed"
-            ? `<button class="btn" data-edit="${esc(account.id)}">Edit</button>
-               <button class="btn danger" data-del="${esc(account.id)}">Delete</button>`
-            : `<span class="dm" style="font-size:11.5px">Declared in tokenbiryani.yaml — edit it there and reload.</span>`}
+            ? `<button class="btn danger" data-del="${esc(account.id)}">Delete</button>`
+            : `${(account.overridden || []).length
+                ? `<button class="btn" data-revert="${esc(account.id)}">Revert to file</button>` : ""}
+               <span class="dm" style="font-size:11.5px">Declared in tokenbiryani.yaml —
+               its credential lives there.</span>`}
         </div>
       </div></div>
       <div class="card"><header><h3>Recent requests</h3>
@@ -1578,6 +2051,8 @@ async function openAccount(id) {
       n.addEventListener("click", () => accountModal(findAccount(n.dataset.edit))));
     detail.querySelectorAll("[data-del]").forEach((n) =>
       n.addEventListener("click", () => deleteAccount(n.dataset.del)));
+    detail.querySelectorAll("[data-revert]").forEach((n) =>
+      n.addEventListener("click", () => revertOverride(n.dataset.revert)));
   } catch (error) { banner(error.message); }
 }
 
@@ -1595,11 +2070,96 @@ function renderKeys(keys) {
       <td class="r mono">${k.spend_cap_usd == null ? "—" : usd(k.spend_cap_usd)}</td>
       <td>${k.admin ? '<span class="pill accent"><i></i>admin</span>' : ""}</td>
       <td class="r">${k.source === "managed"
-        ? `<button class="btn sm danger" data-revoke="${esc(k.name)}">Revoke</button>`
+        ? `<span class="acts"><button class="btn sm" data-edit-key="${esc(k.name)}">Edit</button>
+           <button class="btn sm danger" data-revoke="${esc(k.name)}">Revoke</button></span>`
         : '<span class="dm" title="declared in the config file">in config</span>'}</td>
     </tr>`).join("") + "</tbody>";
+  state.keys = keys;
   el("keys").querySelectorAll("[data-revoke]").forEach((button) =>
     button.addEventListener("click", () => revokeKey(button.dataset.revoke)));
+  el("keys").querySelectorAll("[data-edit-key]").forEach((button) =>
+    button.addEventListener("click", () => keyModal(
+      (state.keys || []).filter((k) => k.name === button.dataset.editKey)[0])));
+}
+
+/** Edit a key's scope in place.
+ *
+ *  The alternative is revoke-and-reissue, which breaks every client already holding
+ *  it. The common case is a key scoped at an account that has since been removed:
+ *  harmless-looking, and it blocks config reload until somebody fixes it.
+ */
+function keyModal(key) {
+  if (!key) return;
+  const accounts = ((state.snapshot || {}).accounts || []).map((a) => a.id);
+  const pool = [].concat(key.pool || []);
+  el("modal-root").innerHTML = `<div class="scrim" id="scrim">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Edit key">
+      <header><h3>Edit ${esc(key.name)}</h3>
+        <button class="btn ghost sm" id="k-x">Close</button></header>
+      <div class="pad stack">
+        <div class="note info"><span>The key itself does not change, so nothing using
+          it has to be updated. To replace the key material, revoke it and mint a
+          new one.</span></div>
+        <div class="f">
+          <span class="t">Pool</span>
+          <div class="stack" id="k-pool-list">${accounts.length
+            ? accounts.map((id) => `<label class="pick"><input type="checkbox"
+                value="${esc(id)}" ${pool.indexOf(id) >= 0 ? "checked" : ""}>
+                <span class="pickb"><span class="pickt">${esc(id)}</span></span></label>`).join("")
+            : '<span class="hint">No accounts yet.</span>'}</div>
+          <span class="hint">None ticked means every account. A key scoped to an
+            account that no longer exists is refused, which is what blocks reload.</span>
+        </div>
+        <div class="grid g3">
+          <label class="f">RPM
+            <input id="k-e-rpm" type="number" step="1" placeholder="none"
+              value="${key.rpm == null ? "" : key.rpm}"></label>
+          <label class="f">Spend cap USD
+            <input id="k-e-cap" type="number" step="0.01" placeholder="none"
+              value="${key.spend_cap_usd == null ? "" : key.spend_cap_usd}"></label>
+          <label class="f">Priority
+            <select id="k-e-pri">${["interactive", "batch", "background"].map((p) =>
+              `<option ${p === key.priority ? "selected" : ""}>${p}</option>`).join("")}</select></label>
+        </div>
+        <label class="f">Models
+          <input id="k-e-models" placeholder="*"
+            value="${esc([].concat(key.models || ["*"]).join(", "))}">
+          <span class="hint">Comma separated. <code>*</code> or blank means every model.</span></label>
+        <div id="k-e-msg"></div>
+      </div>
+      <footer><button class="btn ghost" id="k-cancel">Cancel</button>
+        <button class="btn primary" id="k-save">Save</button></footer>
+    </div></div>`;
+  el("k-x").addEventListener("click", closeModal);
+  el("k-cancel").addEventListener("click", closeModal);
+  el("scrim").addEventListener("click", (e) => { if (e.target.id === "scrim") closeModal(); });
+  el("k-save").addEventListener("click", () => saveKey(key.name));
+}
+
+async function saveKey(name) {
+  const models = el("k-e-models").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const pool = [];
+  el("k-pool-list").querySelectorAll("input:checked").forEach((box) => pool.push(box.value));
+  const button = el("k-save");
+  button.disabled = true;
+  try {
+    await api("/admin/keys/" + encodeURIComponent(name), {
+      method: "PATCH",
+      body: JSON.stringify({
+        pool: pool,
+        models: models.length ? models : ["*"],
+        rpm: el("k-e-rpm").value === "" ? null : Number(el("k-e-rpm").value),
+        spend_cap_usd: el("k-e-cap").value === "" ? null : Number(el("k-e-cap").value),
+        priority: el("k-e-pri").value,
+      }),
+    });
+    closeModal();
+    loadKeys();
+  } catch (error) {
+    el("k-e-msg").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function loadKeys() {
@@ -1639,14 +2199,109 @@ async function revokeKey(name) {
 }
 
 // ---- settings + guide --------------------------------------------------------
+/** Prices come from a dated table or from the operator; either way the console
+ *  says which, because a cost is only trustworthy if you can date it. */
+function pricingLine(snapshot) {
+  const pricing = snapshot.pricing || {};
+  if (!pricing.models) return "none — costs read \u2014";
+  if (pricing.as_of) return pricing.models + " models · bundled table, " + pricing.as_of;
+  return pricing.models + " models · from your config";
+}
+
 function renderSettings(snapshot) {
   el("settings").innerHTML = [
-    ["Strategy", snapshot.strategy], ["Accounts", snapshot.pool.total],
+    ["Accounts", snapshot.pool.total],
     ["Ready", snapshot.pool.ready], ["Cooling", snapshot.pool.cooling],
     ["Disabled", snapshot.pool.disabled], ["Queue depth", snapshot.queue.depth],
-    ["Queue max", snapshot.queue.max_size]
+    ["Queue max", snapshot.queue.max_size], ["Pricing", pricingLine(snapshot)]
   ].map(([label, value]) =>
     `<div><span class="lb">${label}</span><span class="vl">${esc(value)}</span></div>`).join("");
+}
+
+//: Guards against overlapping Settings loads painting out of order.
+let settingsLoad = 0;
+
+/** The two settings worth changing without an editor, and where each came from.
+ *
+ *  Neither is written back to tokenbiryani.yaml: a process that rewrites its
+ *  operator's config file is one that eventually loses a comment somebody needed.
+ *  They are stored in the gateway and laid over the file again after every reload,
+ *  so an unrelated edit cannot silently revert them — which the origin tag says.
+ */
+async function loadEditableSettings(saved) {
+  const wrap = el("settings-edit");
+  if (!wrap) return;
+  // Two clicks on Settings start two loads, and they can resolve out of order.
+  // The older one repainting last puts a stale panel on screen and throws away
+  // whatever was chosen in between, so only the newest load is allowed to paint.
+  const token = ++settingsLoad;
+  try { state.settings = await api("/admin/settings"); }
+  catch (error) {
+    if (token !== settingsLoad) return;
+    wrap.innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+    return;
+  }
+  if (token !== settingsLoad) return;
+  const s = state.settings;
+  const origin = (row) => row.source === "console"
+    ? `<span class="pill cooling" title="set here; the file says ${esc(String(row.file_value))}"><i></i>set in console</span>`
+    : '<span class="pill muted"><i></i>from the file</span>';
+
+  // Read at paint time, not before the fetch: this load is asynchronous, and a
+  // choice made while it was in flight is exactly the one a repaint would drop —
+  // leaving a setting that looked changed and saved the old value.
+  const pending = saved ? {} : {
+    strategy: (el("set-strategy") || {}).value,
+    pricing: (el("set-pricing") || {}).value,
+  };
+  wrap.innerHTML = `<div class="grid g2">
+      <label class="f">Routing strategy ${origin(s.strategy)}
+        <select id="set-strategy">${s.strategy.options.map((name) =>
+          `<option ${name === s.strategy.value ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>
+        <span class="hint">Takes effect on the next request. <b>sticky_headroom</b> keeps
+          a conversation on the account holding its prompt cache; the baselines are
+          there to benchmark against, not to run.</span></label>
+      <label class="f">Price table ${origin(s.pricing_source)}
+        <select id="set-pricing">${s.pricing_source.options.map((name) =>
+          `<option value="${name}" ${name === s.pricing_source.value ? "selected" : ""}>${
+            name === "builtin" ? "Bundled table" : "Only what my config names"}</option>`).join("")}</select>
+        <span class="hint">${s.priced_as_of
+          ? "Bundled table dated <b>" + esc(s.priced_as_of) + "</b> — check it against "
+            + "Anthropic's current pricing before trusting a number."
+          : "Your config's own <span class=\"mono\">pricing:</span> block."}
+          Entries in your config always win. ${s.priced_models.length} model
+          pattern(s) priced.</span></label>
+    </div>
+    <div class="row"><button class="btn primary" id="set-save">Save settings</button>
+      <span id="set-msg" class="note"></span></div>`;
+
+  if (pending.strategy) el("set-strategy").value = pending.strategy;
+  if (pending.pricing) el("set-pricing").value = pending.pricing;
+  el("set-save").addEventListener("click", saveSettings);
+}
+
+async function saveSettings() {
+  const button = el("set-save");
+  button.disabled = true;
+  el("set-msg").innerHTML = "";
+  try {
+    await api("/admin/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        strategy: el("set-strategy").value,
+        pricing_source: el("set-pricing").value,
+      }),
+    });
+    // Re-render first: it replaces this panel wholesale, so a message written
+    // before it would be wiped by its own success.
+    await loadEditableSettings(true);
+    el("set-msg").innerHTML = '<span class="ok">Saved. This survives a restart.</span>';
+    refresh();
+  } catch (error) {
+    el("set-msg").innerHTML = `<span class="err">${esc(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function reloadConfig() {
@@ -1664,19 +2319,13 @@ async function reloadConfig() {
 /** The screen that answers "so how do I actually use this thing". */
 function renderGuide() {
   const origin = location.origin;
-  const exports = `export ANTHROPIC_BASE_URL=${origin}\nexport ANTHROPIC_AUTH_TOKEN=<your key>`;
+  const key = state.mintedKey || state.key || "<your key>";
   el("guide").innerHTML = `
     <section>
       <h2><span class="num">1</span>Point your environment at the gateway</h2>
       <p>Two variables. Nothing else changes — the gateway speaks the Messages API
       verbatim and only swaps the auth header.</p>
-      <pre class="code">export ANTHROPIC_BASE_URL=<b>${esc(origin)}</b>
-export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
-      <div class="copyrow">
-        <button class="btn sm" id="g-copy">Copy both lines</button>
-        <span class="dm" style="font-size:11.5px">Mint a key on the Keys screen.</span>
-      </div>
-      <div id="g-copy-msg"></div>
+      <div id="g-connect"></div>
     </section>
     <section>
       <h2><span class="num">2</span>Run Claude Code through it</h2>
@@ -1688,62 +2337,403 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
       <h2><span class="num">3</span>Or any Anthropic SDK</h2>
       <pre class="code">from anthropic import Anthropic
 
-client = Anthropic(base_url="${esc(origin)}", api_key="&lt;your key&gt;")
+client = Anthropic(base_url="${esc(origin)}", api_key="${esc(key)}")
 client.messages.create(model="claude-sonnet-5", max_tokens=256,
                        messages=[{"role": "user", "content": "hello"}])</pre>
     </section>
     <section>
       <h2><span class="num">4</span>Check it with curl</h2>
       <pre class="code">curl ${esc(origin)}/v1/messages \\
-  -H "x-api-key: &lt;your key&gt;" \\
+  -H "x-api-key: ${esc(key)}" \\
   -H "content-type: application/json" \\
   -d '{"model":"claude-sonnet-5","max_tokens":64,
        "messages":[{"role":"user","content":"hello"}]}'</pre>
       <p>The response carries an <code>x-tokenbiryani-account</code> header naming the
       account that served it.</p>
     </section>`;
-  el("g-copy").addEventListener("click", () => copy(exports, el("g-copy-msg")));
+  renderKeyHandover(el("g-connect"), "g");
 }
 
 // ---- onboarding --------------------------------------------------------------
-/** No accounts at all: a wizard, not an empty table telling you to edit YAML. */
-function renderOnboarding() {
-  const origin = location.origin;
-  state.onboardStep = 1;
-  el("ob-steps").innerHTML = '<i class="on"></i><i></i><i></i>';
-  el("ob-body").innerHTML = `<div class="stack">
-    <h2>Add your first account</h2>
-    <p class="lede">The gateway has nothing to route to yet. Add a credential and it
-    starts pooling immediately — no config file, no restart.</p>
-    <div class="row" style="justify-content:center">
-      <button class="btn primary" id="ob-add">Add an account</button>
-      <button class="btn ghost" id="ob-skip">I edited the YAML instead</button>
-    </div>
-    <p class="lede" style="font-size:11.5px">Serving at <span class="mono">${esc(origin)}</span></p>
-  </div>`;
-  el("ob-add").addEventListener("click", () => accountModal(null));
-  el("ob-skip").addEventListener("click", refresh);
+/**
+ * First run: a full page, four steps, and the work done on the page itself.
+ *
+ * It used to be a 560px card whose first step was a button that opened a dialog,
+ * so the screen you landed on did nothing and the form that mattered arrived
+ * stacked on top of it. The four things that have to happen are unchanged; what
+ * changed is that each one is a screen with room to say what it is for, and the
+ * account form is mounted inline instead of in a modal.
+ *
+ * The rail states all four up front on purpose. What is being asked for is a
+ * credential, and a wizard that reveals its own length one screen at a time earns
+ * none of the trust that asking for one requires.
+ */
+const WIZ_STEPS = [
+  ["Choose a credential", "How this gateway signs in"],
+  ["Point it at the credential", "A login on this machine, or a key you paste"],
+  ["Verify", "Does it work, and can the router read its limits"],
+  ["Connect a client", "The two lines that route through the pool"],
+];
+
+function renderWizSteps(current) {
+  el("ob-addr").textContent = "Serving at " + location.origin;
+  // One button, two exits: on an empty pool it re-reads the file, on a working
+  // pool it simply goes back — and the label has to say which.
+  el("ob-skip").textContent = state.poolEmpty
+    ? "I edited the YAML instead" : "Back to the console";
+  el("ob-steps").innerHTML = WIZ_STEPS.map((step, i) => {
+    const n = i + 1;
+    const cls = n < current ? "done" : n === current ? "on" : "";
+    return `<div class="wiz-step ${cls}"${n === current ? ' aria-current="step"' : ""}>
+      <span class="n">${n < current ? "&#10003;" : n}</span>
+      <span class="t"><b>${esc(step[0])}</b><span>${esc(step[1])}</span></span>
+    </div>`;
+  }).join("");
 }
 
-/** Step 3: the account is in, so hand over the two lines that actually use it. */
-function finishOnboarding(id) {
-  state.onboardStep = 0;
-  const origin = location.origin;
-  const exports = `export ANTHROPIC_BASE_URL=${origin}\nexport ANTHROPIC_AUTH_TOKEN=<your key>`;
-  el("ob-steps").innerHTML = '<i class="done"></i><i class="done"></i><i class="on"></i>';
+/**
+ * Step 1: where this pool's credential comes from.
+ *
+ * One card per route rather than a select, because the routes are not equivalent
+ * — a subscription already signed in on this machine needs nothing typed, and an
+ * API key needs a secret pasted. A dropdown would present those as the same
+ * decision. When a Claude Code login is found, that route leads and says so.
+ */
+async function renderOnboarding() {
+  state.onboardStep = 1;
+  renderWizSteps(1);
   el("ob-body").innerHTML = `<div class="stack">
-    <h2>${esc(id)} is in the pool</h2>
-    <p class="lede">Point a client at the gateway and every request routes through it.</p>
-    <pre class="code">export ANTHROPIC_BASE_URL=<b>${esc(origin)}</b>
-export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b>
-claude</pre>
-    <div class="row" style="justify-content:center">
-      <button class="btn" id="ob-copy">Copy the export lines</button>
-      <button class="btn primary" id="ob-go">Open the console</button>
+    <div class="stack" style="gap:var(--s2)">
+      <h2>Choose a credential</h2>
+      <p class="lede">The gateway holds credentials and lends them out, so a client
+      never carries one. Pick where this pool's first credential comes from — more
+      can be added later, and a pool of one is a valid pool.</p>
     </div>
-    <div id="ob-msg"></div></div>`;
-  el("ob-copy").addEventListener("click", () => copy(exports, el("ob-msg")));
-  el("ob-go").addEventListener("click", refresh);
+    <div class="skel" style="height:210px"></div></div>`;
+
+  // Detection decides the order, so it has to finish before the cards are drawn.
+  // Cached on state, so stepping back to this screen costs nothing.
+  if (state.oauthDetect === null) {
+    try { state.oauthDetect = (await api("/admin/oauth/detect")).candidates || []; }
+    catch (error) { state.oauthDetect = []; }
+  }
+  if (state.onboardStep !== 1) return;   // stepped away while detecting
+
+  const found = (state.oauthDetect || []).filter((c) => c.exists && c.has_token);
+  const fresh = found.filter((c) => !c.expired);
+  const order = found.length
+    ? ["oauth", "anthropic_api", "bedrock", "vertex"]
+    : ["anthropic_api", "oauth", "bedrock", "vertex"];
+
+  const badge = (key, first) => {
+    if (key !== "oauth") return "";
+    if (!found.length) {
+      return '<span class="pill muted"><i></i>none found</span>';
+    }
+    return `${first ? '<span class="pill accent"><i></i>recommended</span>' : ""}
+      <span class="pill ${fresh.length ? "ready" : "cooling"}"><i></i>${found.length}
+      found${fresh.length ? "" : ", stale"}</span>`;
+  };
+
+  const cards = order.map((key, i) => {
+    const spec = ACCOUNT_TYPES[key];
+    return `<label class="route">
+      <input type="radio" name="ob-route" value="${key}"${i === 0 ? " checked" : ""}>
+      <span class="rb">
+        <span class="rt">${esc(spec.label)}${badge(key, i === 0)}</span>
+        <span class="rs">${esc(spec.blurb)}</span>
+      </span></label>`;
+  }).join("");
+
+  // Re-entering the wizard from a working console must not imply the pool is
+  // empty. Saying what is already in it is the whole difference.
+  const pool = (state.snapshot && state.snapshot.pool) || { total: 0 };
+  const existing = pool.total
+    ? `<div class="note info"><span>This pool already has <b>${pool.total}</b>
+        account${pool.total === 1 ? "" : "s"}. Anything added here joins them; nothing
+        is replaced.</span></div>`
+    : "";
+
+  el("ob-body").innerHTML = `<div class="stack">
+    <div class="stack" style="gap:var(--s2)">
+      <h2>Choose a credential</h2>
+      <p class="lede">The gateway holds credentials and lends them out, so a client
+      never carries one. Pick where this pool's first credential comes from — more
+      can be added later, and a pool of one is a valid pool.</p>
+    </div>
+    ${existing}
+    <div class="routes">${cards}</div>
+    <div class="row">
+      <button class="btn primary" id="ob-add">Continue</button>
+    </div></div>`;
+
+  el("ob-add").addEventListener("click", () => {
+    const picked = document.querySelector('input[name="ob-route"]:checked');
+    wizardCredential(picked ? picked.value : "anthropic_api");
+  });
+}
+
+/**
+ * Step 2: the credential itself, on the page.
+ *
+ * Mounts the same form the Accounts dialog uses — `accountFormBody` plus
+ * `wireAccountForm` — so the fields, the derived ID, the paste detection and the
+ * test-before-store behaviour are the ones that are already tested, not a second
+ * implementation that will drift from them.
+ */
+async function wizardCredential(type) {
+  state.onboardStep = 2;
+  renderWizSteps(2);
+  // The heading stays type-independent because the Type select is still on the
+  // form: describing the choice twice would leave one of them stale the moment
+  // somebody changes their mind here rather than stepping back.
+  el("ob-body").innerHTML = `<div class="stack">
+    <div class="stack" style="gap:var(--s2)">
+      <h2>Point it at the credential</h2>
+      <p class="lede">Stored encrypted, and lent out per request — a client never
+      receives it. Everything below except the credential itself can be changed
+      later from the Accounts screen.</p>
+    </div>
+    <div class="card" id="ob-form"></div></div>`;
+
+  await prepAccountForm();
+  if (state.onboardStep !== 2) return;
+  el("ob-form").innerHTML = accountFormBody(null, false, false) + accountFormFooter(false);
+  // Before wiring: paintType() runs inside wireAccountForm and reads this.
+  el("m-type").value = type;
+  wireAccountForm(null, false, false, renderOnboarding);
+  nameFromProfile();
+}
+
+/**
+ * Name a subscription account after the profile directory it reads.
+ *
+ * `~/.claude-abhi/.credentials.json` is already the name the operator gave that
+ * login when they made the alias; asking them to invent a second one, and
+ * refusing to save until they do, is the form doing none of the work. Stops the
+ * moment they type — a field that overwrites what you typed is worse than a
+ * blank one.
+ */
+function nameFromProfile() {
+  const name = el("m-name");
+  if (!name) return;
+  let ours = true;
+  name.addEventListener("input", () => { ours = false; });
+  const fill = () => {
+    const path = el("m-cred-path");
+    if (!ours || !path || !path.value) return;
+    const parts = path.value.split("/").filter(Boolean);
+    const dir = parts[parts.length - 2] || "";
+    const guess = dir.replace(/^\./, "") || "subscription";
+    if (guess && name.value !== guess) {
+      name.value = guess;
+      name.dispatchEvent(new Event("input"));   // the ID derives from the name
+      ours = true;
+    }
+  };
+  fill();
+  // The picker is redrawn whenever the token source changes, so listen on the
+  // form rather than on rows that will not survive the next repaint.
+  el("ob-form").addEventListener("change", (e) => {
+    if (e.target && e.target.name === "m-cred") setTimeout(fill, 0);
+  });
+}
+
+/**
+ * Step 3: check the account against the real upstream and say what came back.
+ *
+ * This is `tokenbiryani doctor` without the command or the spend. It is here rather
+ * than in a doc because the failure it catches is silent: if the upstream spells a
+ * rate-limit header differently, every meter reads full, routing quietly degrades to
+ * round-robin, and the prompt cache is shredded while the console looks healthy.
+ * Nobody runs a check they have never heard of, so the wizard runs it for them.
+ */
+async function verifyOnboarding(id, spend) {
+  state.onboardStep = 3;
+  renderWizSteps(3);
+  el("ob-body").innerHTML = `<div class="stack">
+    <div class="stack" style="gap:var(--s2)">
+      <h2>Checking ${esc(id)}</h2>
+      <p class="lede">Does the credential work, and does this upstream report the
+      rate-limit headers the router needs?</p>
+    </div>
+    <div class="skel" style="height:64px"></div></div>`;
+
+  let report;
+  try {
+    report = await api("/admin/accounts/" + encodeURIComponent(id) + "/diagnose",
+      { method: "POST", body: JSON.stringify({ spend: !!spend }) });
+  } catch (error) {
+    report = { ok: false, detail: error.message, limits: null, limits_source: "unchecked" };
+  }
+
+  // Three answers, not two. "Nothing has gone through this account yet" is not a
+  // fault, and reporting it as nine missing headers — which is what checking a
+  // header-free /v1/models probe would do — would be worse than not checking.
+  let verdict = "", offer = "";
+  if (!report.ok) {
+    verdict = `<div class="note err"><span>The upstream rejected this account:
+      <b>${esc(report.detail || "no detail")}</b><br>
+      Fix the credential on the Accounts screen, then press Test.</span></div>`;
+  } else if (report.limits_source === "unobservable") {
+    verdict = `<div class="note info"><span>Credential accepted. This upstream reports
+      no <b>anthropic-ratelimit-*</b> headers by design, so its meters and the capacity
+      horizon stay empty and it routes on reactive backoff — expected, not a fault.</span></div>`;
+  } else if (report.limits_source === "not_observed") {
+    verdict = `<div class="note ok"><span>Credential accepted.</span></div>
+      <div class="note info"><span>The rate-limit headers have not been seen yet —
+      they only arrive on a real completion, and nothing has gone through this account.
+      Until they are checked, a differently spelled header would leave the meters empty
+      and quietly drop routing to round-robin.<br>
+      Send any request through the gateway and it checks itself, or run it now.</span></div>`;
+    offer = `<button class="btn" id="ob-spend">Run the check now</button>`;
+  } else if (report.limits && report.limits.ok) {
+    verdict = `<div class="note ok"><span>Credential accepted, and every rate-limit
+      header the router needs is present and parsed. Headroom routing, the capacity
+      horizon and admission control all work at full strength.</span></div>`;
+  } else if (report.limits) {
+    verdict = `<div class="note err"><span>Credential accepted, but
+      <b>${report.limits.missing.length}</b> rate-limit header${
+        report.limits.missing.length === 1 ? " is" : "s are"} missing or spelled
+      differently:<br>
+      <span class="mono" style="font-size:10.5px">${esc(report.limits.missing.join(", "))}</span>
+      <br>${esc(report.limits.consequence)}</span></div>`;
+  } else {
+    verdict = `<div class="note ok"><span>Credential accepted.</span></div>`;
+  }
+
+  // The verdict prose stays exactly as it was — it is the part that has to be
+  // read. The checklist above it is a summary of the same two facts, so the
+  // answer is legible before the paragraph explaining it.
+  const mark = (state, label) =>
+    `<div class="check ${state}"><i>${state === "ok" ? "&#10003;"
+      : state === "no" ? "&#10007;" : "&#8226;"}</i><span>${label}</span></div>`;
+  const headerState = !report.ok ? "no"
+    : report.limits_source === "unobservable" ? "na"
+    : report.limits_source === "not_observed" ? "na"
+    : report.limits && report.limits.ok ? "ok" : "no";
+  const headerLabel = !report.ok ? "Rate-limit headers not checked"
+    : report.limits_source === "unobservable" ? "Reports no rate-limit headers, by design"
+    : report.limits_source === "not_observed" ? "Rate-limit headers not seen yet"
+    : report.limits && report.limits.ok ? "Every rate-limit header the router reads is present"
+    : "Some rate-limit headers are missing or spelled differently";
+  const checks = mark(report.ok ? "ok" : "no",
+    report.ok ? "Credential accepted by the upstream" : "The upstream rejected this credential")
+    + mark(headerState, headerLabel);
+
+  el("ob-body").innerHTML = `<div class="stack">
+    <div class="stack" style="gap:var(--s2)">
+      <h2>${esc(id)} is in the pool</h2>
+      <p class="lede">Two things were checked: that the upstream accepts this
+      credential, and that it reports what the router reads to route on.</p>
+    </div>
+    <div class="checks">${checks}</div>
+    ${verdict}
+    <div class="row">
+      <button class="btn primary" id="ob-next">Connect a client</button>
+      ${offer}
+    </div>
+    ${offer ? `<p class="lede" style="font-size:11px">One request with
+      <span class="mono">max_tokens=1</span> — a fraction of a cent. It is the only
+      thing here that spends anything.</p>` : ""}</div>`;
+  el("ob-next").addEventListener("click", () => finishOnboarding(id));
+  if (el("ob-spend")) {
+    el("ob-spend").addEventListener("click", () => verifyOnboarding(id, true));
+  }
+}
+
+/** Step 4: the two lines that actually use it — with a key that works. */
+async function finishOnboarding(id) {
+  state.onboardStep = 4;
+  renderWizSteps(4);
+  el("ob-body").innerHTML = `<div class="stack">
+    <div class="stack" style="gap:var(--s2)">
+      <h2>Point a client at the gateway</h2>
+      <p class="lede">Two variables, and every request routes through the pool.
+      Without them a client talks to Anthropic directly and this gateway sees
+      nothing — which is what an empty usage chart usually means.</p>
+    </div>
+    <div id="ob-connect"></div>
+    <div class="row">
+      <button class="btn primary" id="ob-go">Open the console</button>
+    </div></div>`;
+  el("ob-go").addEventListener("click", leaveWizard);
+  await renderKeyHandover(el("ob-connect"), "ob");
+}
+
+/** The one way out, whether the wizard was entered on an empty pool or opened
+ *  from the sidebar. Both flags have to clear or refresh() draws it again. */
+function leaveWizard() {
+  state.onboardStep = 0;
+  state.wizardOpen = false;
+  refresh();
+}
+
+
+// ---- handing over a key that works -------------------------------------------
+/**
+ * The export lines, with a real key in them.
+ *
+ * Both this and the Connect screen used to print `<your key>` — while the browser
+ * was holding a working key in localStorage and the Keys screen showed every key
+ * masked. The user was one copy button from being done and was instead sent back to
+ * the file they were told they would not need.
+ *
+ * Minting a client key is offered first and recommended, because the key in this
+ * browser is an admin key, and a client should not be carrying one.
+ */
+async function renderKeyHandover(target, prefix) {
+  if (!target) return;
+  const origin = location.origin;
+  const paint = (key, note) => {
+    const lines = `export ANTHROPIC_BASE_URL=${origin}\nexport ANTHROPIC_AUTH_TOKEN=${key}`;
+    target.innerHTML = `<div class="stack">
+      <pre class="code">export ANTHROPIC_BASE_URL=<b>${esc(origin)}</b>
+export ANTHROPIC_AUTH_TOKEN=<b>${esc(key)}</b>
+claude</pre>
+      ${note}
+      <div class="copyrow">
+        <button class="btn sm" id="${prefix}-copy">Copy the export lines</button>
+        <button class="btn sm ghost" id="${prefix}-mint">Mint a client key</button>
+      </div>
+      <div id="${prefix}-msg"></div></div>`;
+    el(prefix + "-copy").addEventListener("click", () => copy(lines, el(prefix + "-msg")));
+    el(prefix + "-mint").addEventListener("click", () => mintClientKey(target, prefix));
+  };
+
+  if (state.mintedKey) {
+    paint(state.mintedKey, `<div class="note ok"><span>A client key, scoped to no admin
+      access. Copy it now — it is stored hashed and cannot be shown again.</span></div>`);
+  } else if (state.key) {
+    paint(state.key, `<div class="note warn"><span>This is the <b>admin</b> key you
+      signed in with. It works, but a client carrying it can also read your pool and
+      mint more keys — <b>Mint a client key</b> issues one that cannot.</span></div>`);
+  } else {
+    // An open gateway: no keys configured, so no key to send.
+    paint("<not needed>", `<div class="note info"><span>This gateway has no keys
+      configured, so it accepts any request from loopback. Add a <span class="mono">keys:</span>
+      entry before exposing it to anything.</span></div>`);
+  }
+}
+
+async function mintClientKey(target, prefix) {
+  const button = el(prefix + "-mint");
+  if (button) button.disabled = true;
+  try {
+    // A name that says where it came from, uniquified so a second press works.
+    const name = "client-" + Math.random().toString(36).slice(2, 7);
+    const created = await api("/admin/keys", {
+      method: "POST",
+      body: JSON.stringify({ name: name, admin: false, priority: "interactive" }),
+    });
+    state.mintedKey = created.key;
+    // The Connect screen prints the key into its SDK and curl snippets too, so it
+    // is redrawn whole rather than just the block that owns the button.
+    if (prefix === "g") renderGuide(); else await renderKeyHandover(target, prefix);
+  } catch (error) {
+    el(prefix + "-msg").innerHTML = `<div class="note err">${esc(error.message)}</div>`;
+    if (button) button.disabled = false;
+  }
 }
 
 // ---- data --------------------------------------------------------------------
@@ -1758,10 +2748,20 @@ async function refresh() {
     // console that relied on it alone showed an empty list until traffic arrived.
     state.requests = recent.requests;
 
-    const empty = snapshot.pool.total === 0;
-    el("onboarding").classList.toggle("hidden", !empty);
-    el("app").classList.toggle("hidden", empty);
-    if (empty) {
+    // The wizard keeps the screen past step 1. Steps 2 and 3 verify and hand over
+    // the key, and both happen once the first account exists — so keying the
+    // wizard purely off an empty pool dropped the operator into the console the
+    // instant they saved, and neither step ever ran.
+    // One flag decides the screen. An empty pool always raises it — there is
+    // nothing for the console to show — and the sidebar's Add an account raises it
+    // on a working pool. Keying off `empty` alone was what made steps 3 and 4
+    // unreachable: the pool stops being empty the moment step 2 saves, which is
+    // exactly when the rest of the wizard is supposed to run.
+    state.poolEmpty = snapshot.pool.total === 0;
+    if (state.poolEmpty) state.wizardOpen = true;
+    el("onboarding").classList.toggle("hidden", !state.wizardOpen);
+    el("app").classList.toggle("hidden", state.wizardOpen);
+    if (state.wizardOpen) {
       if (!state.onboardStep) renderOnboarding();
       return;
     }
@@ -1865,7 +2865,7 @@ function activate(nodes, handler) {
 
 function show(name) {
   state.tab = name;
-  document.querySelectorAll(".nav button").forEach((b) =>
+  document.querySelectorAll(".nav button[data-tab]").forEach((b) =>
     b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("[data-panel]").forEach((p) =>
     p.classList.toggle("hidden", p.dataset.panel !== name));
@@ -1874,6 +2874,7 @@ function show(name) {
   el("view-sub").textContent = sub;
   if (name === "keys") loadKeys();
   if (name === "guide") renderGuide();
+  if (name === "settings") loadEditableSettings();
   // Fetched on demand, not on the 5s poll: a 30-day window is a real query.
   if (name === "usage") loadUsage();
 }
@@ -1955,7 +2956,7 @@ function setAttr(name, store, value) {
   try { localStorage.setItem(store, value); } catch (e) { /* ignore */ }
 }
 
-document.querySelectorAll(".nav button").forEach((b) =>
+document.querySelectorAll(".nav button[data-tab]").forEach((b) =>
   b.addEventListener("click", () => show(b.dataset.tab)));
 el("gate-go").addEventListener("click", () => {
   const value = el("gate-key").value.trim();
@@ -1963,13 +2964,24 @@ el("gate-go").addEventListener("click", () => {
 });
 el("gate-key").addEventListener("keydown", (e) => { if (e.key === "Enter") el("gate-go").click(); });
 el("signout").addEventListener("click", () => signOut(""));
-el("theme").addEventListener("click", () => setAttr("data-theme", THEME_STORE,
-  document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
-el("density").addEventListener("click", () => setAttr("data-density", DENSITY_STORE,
-  document.documentElement.getAttribute("data-density") === "compact" ? "comfortable" : "compact"));
+const flipTheme = () => setAttr("data-theme", THEME_STORE,
+  document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+el("theme").addEventListener("click", flipTheme);
+// The wizard hides #app, so it needs its own copy of the control rather than a
+// second element carrying the same id.
+el("ob-theme").addEventListener("click", flipTheme);
+el("ob-skip").addEventListener("click", leaveWizard);
+// Not a tab — it leaves the console for the wizard, and comes back through
+// leaveWizard() like every other exit.
+el("nav-setup").addEventListener("click", () => {
+  state.wizardOpen = true;
+  state.onboardStep = 0;
+  refresh();
+});
 el("k-create").addEventListener("click", createKey);
 el("reload").addEventListener("click", reloadConfig);
 el("acct-add").addEventListener("click", () => accountModal(null));
+el("acct-test-all").addEventListener("click", (e) => testAllAccounts(e.currentTarget));
 
 /** One filter row above the charts; every chart re-renders against the same slice. */
 function segmented(id, attribute, apply) {
@@ -1984,17 +2996,42 @@ function segmented(id, attribute, apply) {
 segmented("u-range", "window", (value) => { state.window = value; });
 segmented("u-group", "group", (value) => { state.groupBy = value; });
 
-(function boot() {
-  let stored = "", theme = "dark", density = "comfortable";
+/**
+ * `tokenbiryani console` opens us with ?t=<ticket>. Spend it for the admin key and
+ * take it back out of the address bar before anything else runs — a ticket is
+ * single-use, but a URL is forever, and the one in the history bar would be a dead
+ * link that looks like a live one.
+ */
+async function redeemTicket() {
+  const ticket = new URLSearchParams(location.search).get("t");
+  if (!ticket) return "";
+  history.replaceState(null, "", location.pathname);
+  try {
+    const response = await fetch("/admin/console-session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticket: ticket }),
+    });
+    if (!response.ok) return "";
+    return (await response.json()).key || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+(async function boot() {
+  let stored = "", theme = "dark";
   try {
     stored = localStorage.getItem(KEY_STORE) || "";
     theme = localStorage.getItem(THEME_STORE) || "dark";
-    density = localStorage.getItem(DENSITY_STORE) || "comfortable";
   } catch (e) { /* private mode */ }
   document.documentElement.setAttribute("data-theme", theme);
-  document.documentElement.setAttribute("data-density", density);
   el("lp-addr").textContent = location.host;
   el("lp-base").textContent = location.origin;
+  // A handed-over key outranks whatever this browser was holding: the operator just
+  // said which gateway they mean by running the command against it.
+  const handed = await redeemTicket();
+  if (handed) stored = handed;
   // A gateway with no keys configured is open; try it before asking for one.
   fetch("/admin/status", { headers: stored ? { "x-api-key": stored } : {} })
     .then((r) => r.ok ? signIn(stored, true) : signOut(""))

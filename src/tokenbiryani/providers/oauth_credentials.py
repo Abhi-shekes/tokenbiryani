@@ -16,6 +16,7 @@ working unchanged.
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import time
@@ -156,6 +157,106 @@ class CredentialsFile(TokenSource):
 
     def describe(self) -> str:
         return f"credentials file {self.path}"
+
+
+#: The conventional way to keep two Claude Code accounts on one machine: a config
+#: directory per account, selected with CLAUDE_CONFIG_DIR.
+#:
+#:     alias claude-abhi='CLAUDE_CONFIG_DIR="$HOME/.claude-abhi" claude'
+#:
+#: Scanning for these is the whole point of the scan. A pool is several accounts,
+#: they are already sitting in the home directory, and asking the operator to type
+#: paths they have to go and look up is how you end up pointed at the wrong one.
+PROFILE_GLOB = ".claude-*"
+
+
+def candidate_paths() -> List[str]:
+    """Where a Claude Code login might have written its credentials, best first.
+
+    `CLAUDE_CONFIG_DIR` leads because it is the one people miss: with it set, the
+    file under ~/.claude is a *different* account whose token may have expired weeks
+    ago, and the 401 that follows names neither file.
+    """
+    home = os.path.expanduser("~")
+    roots: List[str] = []
+    configured = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if configured:
+        roots.append(os.path.expanduser(configured))
+    roots.append(os.path.join(home, ".claude"))
+    # Sorted, so the same machine lists them in the same order every time.
+    roots.extend(sorted(glob.glob(os.path.join(home, PROFILE_GLOB))))
+    roots.append(os.path.join(home, ".config", "claude"))
+
+    seen: List[str] = []
+    for root in roots:
+        if not os.path.isdir(root) and not root.endswith((".claude", "claude")):
+            # A glob hit that is not a directory is not a profile.
+            continue
+        path = os.path.join(root, ".credentials.json")
+        if path not in seen:
+            seen.append(path)
+    return seen
+
+
+def describe_credentials(path: str) -> Dict[str, Any]:
+    """What a credentials file holds, without ever reading out the token.
+
+    Everything here is what an operator needs to pick the right file — which
+    subscription, whether it is current — and nothing here is a secret. The token
+    and refresh token are not read, not returned and not logged.
+    """
+    out: Dict[str, Any] = {
+        "path": path,
+        "exists": os.path.exists(path),
+        "readable": False,
+        "has_token": False,
+        "subscription": None,
+        "expires_at": None,
+        "expired": None,
+        "scopes": [],
+        "detail": "",
+    }
+    if not out["exists"]:
+        out["detail"] = "no file there"
+        return out
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as exc:
+        out["detail"] = f"cannot read it: {exc}"
+        return out
+    if not isinstance(data, dict):
+        out["detail"] = "not a JSON object"
+        return out
+
+    out["readable"] = True
+    block = data.get("claudeAiOauth")
+    if not isinstance(block, dict):
+        out["detail"] = "no claudeAiOauth block — this is not a Claude Code login"
+        return out
+    out["has_token"] = bool(block.get("accessToken"))
+    out["subscription"] = block.get("subscriptionType") or None
+    expires_at = _as_epoch_seconds(block.get("expiresAt"))
+    out["expires_at"] = expires_at
+    if expires_at is not None:
+        out["expired"] = expires_at <= time.time()
+    scopes = block.get("scopes")
+    out["scopes"] = [str(s) for s in scopes] if isinstance(scopes, list) else []
+    if not out["has_token"]:
+        out["detail"] = "signed out — no access token in the file"
+    elif out["expired"]:
+        out["detail"] = (
+            "the token in this file has expired. Run `claude` once to renew it; the "
+            "gateway picks the new one up without a restart."
+        )
+    else:
+        out["detail"] = "current"
+    return out
+
+
+def detect_credentials() -> List[Dict[str, Any]]:
+    """Every Claude Code credentials file this machine might be signed in to."""
+    return [describe_credentials(path) for path in candidate_paths()]
 
 
 def build_source(options: Dict[str, Any]) -> TokenSource:

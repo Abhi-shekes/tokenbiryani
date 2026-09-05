@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from conftest import body, drain
-
-from tokenbiryani.testing.mock_upstream import (
+from support.mock_upstream import (
     invalid_request,
     ok,
     rate_limit,

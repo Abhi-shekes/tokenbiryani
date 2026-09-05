@@ -40,7 +40,7 @@ body:
       label: Reproduction
       description: >
         The most useful form is a failing test against the mock upstream
-        (`tokenbiryani.testing.mock_upstream`) — see CONTRIBUTING.
+        (`tests/support/mock_upstream.py`) — see CONTRIBUTING.
       render: python
   - type: textarea
     id: config

@@ -6,9 +6,9 @@ import json
 
 import httpx
 from conftest import body, build, make_config
+from support.mock_upstream import invalid_request, rate_limit
 
 from tokenbiryani.api.app import create_app
-from tokenbiryani.testing.mock_upstream import invalid_request, rate_limit
 
 
 def app_client(mock, account_ids=("a", "b"), **kwargs):
@@ -90,14 +90,14 @@ async def test_healthz(mock):
     assert response.json()["ready"] == 2
 
 
-async def test_metrics_endpoint(mock):
+async def test_there_is_no_metrics_endpoint(mock):
+    """Prometheus exposition was removed. `/admin/status` and `/admin/usage` are the
+    operational surfaces now, and both are authenticated — which `/metrics` was not."""
     client, _ = app_client(mock)
     async with client:
         await client.post("/v1/messages", json=body(), headers=AUTH)
         response = await client.get("/metrics")
-    assert response.status_code == 200
-    assert "tokenbiryani_requests_total" in response.text
-    assert "tokenbiryani_account_headroom" in response.text
+    assert response.status_code == 404
 
 
 async def test_admin_status_requires_auth(mock):

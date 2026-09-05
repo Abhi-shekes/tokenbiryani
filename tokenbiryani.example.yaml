@@ -124,16 +124,34 @@ accounts:
   #     model_map:
   #       claude-test-1: claude-3-5-sonnet-v2@20241022
 
-# Subscription accounts (type: oauth), added by logging in from the console.
+# A Claude subscription (type: oauth). Three ways to give it a token — see
+# docs/oauth.md — and only the third needs the `oauth:` block below.
 #
+#   - id: claude-code
+#     name: Claude Code (Pro)
+#     type: oauth
+#     options:
+#       # 1. This machine's Claude Code login. The gateway reads the token the CLI
+#       #    wrote and re-reads it whenever the CLI refreshes it. Name the profile
+#       #    you actually sign in with: CLAUDE_CONFIG_DIR points the CLI elsewhere,
+#       #    and ~/.claude is then a different account. The console's Add-account
+#       #    dialog scans for these and shows which is current.
+#       credentials_path: ~/.claude/.credentials.json
+#       # 2. A long-lived token from `claude setup-token`. Prefer adding this from
+#       #    the console, which encrypts it; a token written here is plaintext.
+#       # access_token: ${CLAUDE_OAUTH_TOKEN}
+#       # token_env: CLAUDE_OAUTH_TOKEN
+#       # Unverified default; set it if the gateway logs a 4xx naming a beta flag.
+#       # beta_header: oauth-2025-04-20
+#
+# A subscription reports rolling-window utilisation rather than per-window budgets,
+# so it keeps headroom routing and failover but has no binding leases, no admission
+# control and no capacity horizon. observable_limits is forced false for it.
+#
+# 3. The login the gateway runs itself — what pooling several subscriptions needs.
 # Empty by default and the login refuses until all three are set. Anthropic does not
-# publish the OAuth endpoints its first-party clients use, and this project has never
-# been run against a real subscription session, so it will not guess: a wrong value
-# hard-coded here would look like a working feature. See docs/oauth.md.
-#
-# Read that page before using one at all — subscription sessions send no
-# anthropic-ratelimit-* headers, so these accounts lose headroom routing, binding
-# leases, admission control and the capacity horizon.
+# publish the OAuth endpoints its first-party clients use, so this project will not
+# guess: a wrong value hard-coded here would look like a working feature.
 # oauth:
 #   client_id: ""
 #   authorize_url: ""

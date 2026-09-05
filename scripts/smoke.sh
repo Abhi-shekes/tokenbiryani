@@ -38,8 +38,11 @@ port_free() {
 }
 
 wait_for() {
+  # Any HTTP answer means the process is listening, which is all this asks. Insisting
+  # on 2xx would make readiness depend on the endpoint's own auth: the mock upstream
+  # authenticates /v1/models, so a keyless probe there is a 401 from a healthy server.
   local url=$1 name=$2 tries=0
-  until curl -sf -o /dev/null "$url"; do
+  until curl -s -o /dev/null "$url"; do
     tries=$((tries + 1))
     if [ $tries -gt 60 ]; then echo "FAIL: $name never came up at $url"; exit 1; fi
     sleep 0.25
@@ -48,6 +51,16 @@ wait_for() {
 
 say() { printf '  %-46s %s\n' "$1" "$2"; }
 
+# Substring tests without a pipe.
+#
+# `echo "$BIG" | grep -q needle` is a trap under `set -o pipefail`: grep -q exits the
+# moment it matches, and if the value is larger than the pipe buffer the echo still
+# writing into it dies of SIGPIPE. pipefail then reports 141 for a pipeline that
+# matched, so the check fails intermittently — on size, which is why it only started
+# happening when the console grew past 64KB. Bash's own matching has no pipe and no
+# race.
+contains() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+
 echo
 echo "smoke: mock upstream :$UPSTREAM_PORT -> gateway :$GATEWAY_PORT"
 echo
@@ -55,7 +68,10 @@ echo
 port_free "$UPSTREAM_PORT" "mock upstream"
 port_free "$GATEWAY_PORT" "gateway"
 
-python3 -m tokenbiryani.testing.server --port "$UPSTREAM_PORT" --accounts key-a,key-b \
+# The fake upstream is test scaffolding, not part of the installed package, so it is
+# run from the source tree rather than imported from wherever tokenbiryani installed.
+PYTHONPATH="$ROOT/tests" python3 -m support.server \
+  --port "$UPSTREAM_PORT" --accounts key-a,key-b \
   >"$WORK/upstream.log" 2>&1 &
 PIDS+=($!)
 
@@ -93,7 +109,8 @@ fail() { echo "FAIL: $1"; echo "--- gateway log ---"; cat "$WORK/gateway.log"; e
 BODY='{"model":"claude-test-1","max_tokens":64,"messages":[{"role":"user","content":"hello"}]}'
 OUT=$(curl -sS -X POST "http://127.0.0.1:$GATEWAY_PORT/v1/messages" \
   -H "x-api-key: $KEY" -H 'content-type: application/json' -d "$BODY")
-echo "$OUT" | grep -q '"role": *"assistant"' || fail "non-streaming request: $OUT"
+contains "$OUT" '"role": "assistant"' || contains "$OUT" '"role":"assistant"' \
+  || fail "non-streaming request: $OUT"
 say "non-streaming request" "ok"
 
 # 2. the account that served it is reported
@@ -107,9 +124,9 @@ say "routed to an account" "$ACCT"
 SBODY='{"model":"claude-test-1","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}'
 STREAM=$(curl -sS -N -X POST "http://127.0.0.1:$GATEWAY_PORT/v1/messages" \
   -H "x-api-key: $KEY" -H 'content-type: application/json' -d "$SBODY")
-echo "$STREAM" | grep -q 'event: content_block_delta' || fail "streaming: $STREAM"
-echo "$STREAM" | grep -q 'event: message_stop' || fail "stream did not finish"
-echo "$STREAM" | grep -q 'event: error' && fail "unexpected error frame in stream"
+contains "$STREAM" 'event: content_block_delta' || fail "streaming: $STREAM"
+contains "$STREAM" 'event: message_stop' || fail "stream did not finish"
+contains "$STREAM" 'event: error' && fail "unexpected error frame in stream"
 say "streaming request" "ok"
 
 # 4. affinity: the same conversation stays on one account
@@ -135,22 +152,22 @@ UNAUTH=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$GATE
 [ "$UNAUTH" = "401" ] || fail "unauthenticated request should be 401, got $UNAUTH"
 say "unauthenticated request rejected" "401"
 
-# 7. metrics
-curl -sS "http://127.0.0.1:$GATEWAY_PORT/metrics" | grep -q tokenbiryani_requests_total \
-  || fail "metrics missing"
-say "prometheus metrics" "ok"
+# 7. usage history — the accounting surface that replaced /metrics
+USAGE=$(curl -sS "http://127.0.0.1:$GATEWAY_PORT/admin/usage?window=1h" -H "x-api-key: $KEY")
+contains "$USAGE" '"requests"' || fail "usage history missing"
+say "usage history" "ok"
 
 # 8. the console
 CONSOLE=$(curl -sS "http://127.0.0.1:$GATEWAY_PORT/console")
-echo "$CONSOLE" | grep -q "tokenbiryani console" || fail "console not served"
-echo "$CONSOLE" | grep -q "$KEY" && fail "the console shell must not contain the key"
+contains "$CONSOLE" "tokenbiryani console" || fail "console not served"
+contains "$CONSOLE" "$KEY" && fail "the console shell must not contain the key"
 say "console" "ok"
 
 # 9. the CLI
 STATUS=$(TOKENBIRYANI_URL="http://127.0.0.1:$GATEWAY_PORT" \
   python3 -m tokenbiryani.cli status --key "$KEY" --no-color)
-echo "$STATUS" | grep -q "acct-01" || fail "cli status: $STATUS"
-echo "$STATUS" | grep -q "ready" || fail "cli status has no ready account"
+contains "$STATUS" "acct-01" || fail "cli status: $STATUS"
+contains "$STATUS" "ready" || fail "cli status has no ready account"
 say "cli status" "ok"
 
 echo

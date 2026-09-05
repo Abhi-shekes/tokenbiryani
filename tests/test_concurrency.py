@@ -95,8 +95,9 @@ async def test_no_leases_or_inflight_leak_under_load(gateway_factory, mock, key)
 
 
 async def test_concurrent_failures_also_release_their_leases(gateway_factory, mock, key):
+    from support.mock_upstream import server_error
+
     from tokenbiryani.core.gateway import GatewayError
-    from tokenbiryani.testing.mock_upstream import server_error
 
     # Once both breakers trip there is genuinely nothing to wait for but their
     # cooldown; bound the wait rather than sit through it.

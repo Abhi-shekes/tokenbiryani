@@ -85,7 +85,7 @@ not a free action.
                  │                     + limits   failover          │
                  │                        │         │               │
                  │                        ▼         ▼               │
-                 │                   state store  events ─▶ metrics │
+                 │                   state store    events         │
                  └──────────────────────────────────────────────────┘
 ```
 
@@ -109,7 +109,7 @@ not a free action.
 ```
 tokenbiryani/
   api/            # FastAPI routes: /v1/messages, /v1/messages/count_tokens,
-                  #   /v1/models, /admin/*, /metrics, /healthz
+                  #   /v1/models, /admin/*, /healthz
   core/
     registry.py   # account registry, config load + hot reload
     account.py    # Account model, capabilities, health state machine
@@ -130,7 +130,7 @@ tokenbiryani/
   store/
     memory.py  sqlite.py  redis.py    # one StateStore interface
   observability/
-    metrics.py  logs.py  events.py
+    logs.py  events.py  usage.py
   dashboard/      # static SPA fed by SSE
   cli.py
 ```
@@ -264,9 +264,15 @@ tokens and spend by model, cache hit rate.
 **Global:** RPS, queue depth and wait-time histogram, failover count, **cache-break
 count**, spend burn-down against caps, per-virtual-key attribution.
 
-**Surfaces:** Prometheus `/metrics`; structured JSON logs keyed by `request_id` with the
-full attempt chain; a built-in single-page dashboard fed by SSE; optional OpenTelemetry
-traces.
+**Surfaces:** structured JSON logs keyed by `request_id` with the full attempt chain;
+a built-in dashboard fed by SSE; `GET /admin/status` for the live pool and
+`GET /admin/usage` for persisted history; optional OpenTelemetry traces.
+
+> **No Prometheus endpoint.** `/metrics` was built and then removed. It was the only
+> unauthenticated surface on the gateway — everything else on `/admin` requires an
+> admin key — and it exposed account ids, spend and traffic shape to anything that
+> could reach the port. The two admin endpoints above carry the same facts behind the
+> same key as the rest, and `tokenbiryani status --json` pipes them anywhere.
 
 **Privacy default: prompt bodies are never logged.** Opt-in sampling only, with
 redaction. A tool that sits in the prompt path and logs by default is one incident away
@@ -337,7 +343,7 @@ premise does not hold.
 | **M2** | Smart routing | Limit mirror, token estimation, leases, headroom scoring, circuit breaker | Routing beats round-robin on measured 429 rate |
 | **M3** | Continuity | Session affinity, prefix fingerprinting, cache metrics | Cache hit rate stays high across a multi-turn session |
 | **M4** | Queue | Admission control, priority queue, deadlines, backpressure | Graceful behavior when the whole pool is saturated |
-| **M5** | Observability | `/metrics`, structured logs, SSE dashboard | Operators can see and trust it |
+| **M5** | Observability | Admin API, structured logs, SSE dashboard | Operators can see and trust it |
 | **M6** | Multi-tenant | Virtual keys, spend caps, Redis store, multi-instance | Usable by a team, not just one laptop |
 | **M7** | Breadth | Bedrock/Vertex adapters, batch spill lane, strategy plugins | Ecosystem surface |
 

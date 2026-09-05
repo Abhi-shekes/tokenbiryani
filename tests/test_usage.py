@@ -222,8 +222,9 @@ async def test_a_failed_request_is_recorded_too(mock, key, tmp_path):
     validation (no `model`) never touches an account and never becomes gateway
     usage — the event log leaves those out too.
     """
+    from support.mock_upstream import auth_error
+
     from tokenbiryani.core.gateway import GatewayError
-    from tokenbiryani.testing.mock_upstream import auth_error
 
     config = make_config(["a"])
     config.store.backend = "sqlite"
@@ -252,3 +253,54 @@ def test_sample_from_event_is_json_safe():
     assert sample["cost_usd"] == 0.0
     assert sample["status"] == 0
     assert all(not isinstance(v, (dict, list)) for v in sample.values())
+
+
+# ---- the bundled price table ---------------------------------------------------
+# The standing rule is that the gateway must never bill against a number nobody can
+# attribute. A dated file the console shows the date of satisfies it; a dict
+# hard-coded in config.py would not, which is why this is data and has an `as_of`.
+
+
+def test_pricing_builtin_loads_a_dated_table():
+    from tokenbiryani.config import Config
+
+    config = Config.from_dict({"pricing": "builtin"})
+    assert config.pricing, "the shipped table has models in it"
+    assert config.pricing_as_of, "and a date, which the console displays"
+    assert config.price_for("claude-opus-5") is not None
+
+
+def test_an_operator_price_beats_the_bundled_one():
+    from tokenbiryani.config import Config
+
+    config = Config.from_dict({"pricing": {
+        "builtin": True,
+        "claude-opus-5": {"input": 1.0, "output": 2.0},
+    }})
+    assert config.price_for("claude-opus-5").input == 1.0, "yours wins"
+    assert config.price_for("claude-sonnet-5") is not None, "the rest still loads"
+
+
+def test_prices_stay_absent_unless_asked_for():
+    """Opt-in, because a price nobody chose is a number nobody checked."""
+    from tokenbiryani.config import Config
+
+    assert Config.from_dict({}).pricing == {}
+    assert Config.from_dict({}).pricing_as_of == ""
+
+
+def test_a_misspelled_pricing_directive_is_refused():
+    from tokenbiryani.config import Config, ConfigError
+
+    with pytest.raises(ConfigError) as caught:
+        Config.from_dict({"pricing": "buitlin"})
+    assert "builtin" in str(caught.value), "the message says what was meant"
+
+
+def test_the_price_table_ships_with_the_package():
+    """A wheel without it makes `pricing: builtin` silently price nothing."""
+    import os
+
+    from tokenbiryani.config import BUILTIN_PRICES_PATH
+
+    assert os.path.exists(BUILTIN_PRICES_PATH)

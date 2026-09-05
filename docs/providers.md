@@ -20,15 +20,18 @@ are empty by default, because Anthropic does not publish the endpoints its first
 clients use and a guess would look like a working feature. [docs/oauth.md](oauth.md)
 covers how to fill them in.
 
-Understand the trade before you do. Subscription sessions send no
-`anthropic-ratelimit-*` headers, and those headers are the entire routing signal. Such
-an account keeps failover and prompt-cache affinity, and loses headroom-aware routing,
-binding leases, admission control and the capacity horizon — falling back to reactive
-429 backoff, which is what a generic proxy already does.
+Understand the trade before you do. A subscription session sends no
+`anthropic-ratelimit-{requests,input-tokens,output-tokens}-*` triples. It sends
+`anthropic-ratelimit-unified-{5h,7d}-utilization` instead — a share of a rolling window
+rather than a remaining count — and the mirror reads those, so such an account keeps
+failover, prompt-cache affinity and headroom-aware routing. What it loses is everything
+that needs an absolute token count: binding leases, admission control and the capacity
+horizon.
 
-`observable_limits` is forced false for these accounts rather than left to you: read
-as permanently full, such an account wins every routing comparison and starves every
-API-key account in the pool.
+`observable_limits` is forced false for these accounts rather than left to you. It
+means "no per-window budgets", not "no limits": left true, windows that never populate
+read as permanently full, and the account would win every routing comparison and starve
+every API-key account in the pool. Its unified utilisation is read either way.
 
 There is also a terms question, and it is not the same question for one account as for
 several. [docs/oauth.md](oauth.md) covers both.

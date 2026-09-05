@@ -175,16 +175,38 @@ class KeyConfig:
 
 @dataclass
 class ModelPrice:
-    """USD per million tokens. Operator-supplied: the gateway ships no price list.
+    """USD per million tokens.
 
-    Costs are only reported, and spend caps only enforced, for models named here.
-    Guessing prices in code would mean silently billing against stale numbers.
+    Costs are only reported, and spend caps only enforced, for models priced here.
+    Prices come from one of two places, and never from a literal in this module:
+    the operator's own `pricing:` block, or the dated `prices.yaml` that ships with
+    the release and is opted into with `pricing: builtin`.
+
+    The rule that produced that split is unchanged — the gateway must never bill
+    against a number nobody can attribute. A dated file whose date the console
+    displays is attributable; a dict hard-coded here would not be.
     """
 
     input: float = 0.0
     output: float = 0.0
     cache_read: float = 0.0
     cache_write: float = 0.0
+
+
+#: The bundled table, beside this module. Read once, on demand.
+BUILTIN_PRICES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prices.yaml")
+
+#: Reserved key inside a `pricing:` mapping; no model id collides with it.
+BUILTIN = "builtin"
+
+
+def load_builtin_prices() -> Dict[str, Any]:
+    """The shipped price table, or an empty one if it is missing from the install."""
+    try:
+        with open(BUILTIN_PRICES_PATH, encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    except OSError:
+        return {}
 
 
 @dataclass
@@ -266,7 +288,42 @@ class Config:
     accounts: List[AccountConfig] = field(default_factory=list)
     keys: List[KeyConfig] = field(default_factory=list)
     pricing: Dict[str, ModelPrice] = field(default_factory=dict)
+    #: The date on the bundled table, when it is in use. Surfaced by the console so
+    #: a stale price is visible rather than silent.
+    pricing_as_of: str = ""
+    pricing_source: str = ""
+    #: Which table the prices above came from: "builtin" (the dated file shipped
+    #: with the release), "config" (only what tokenbiryani.yaml names), or "none".
+    #: The console can switch this at runtime, which is why the raw block is kept.
+    pricing_table: str = "none"
+    pricing_raw: Any = None
     path: Optional[str] = None
+
+    def use_pricing(self, table: str) -> str:
+        """Rebuild the price table from the config file's own `pricing:` block.
+
+        The operator's entries always win: switching to "builtin" lays the dated
+        table underneath them, and switching to "config" takes it away. Neither
+        touches the file — a console setting is an overlay, not an edit.
+        """
+        raw = self.pricing_raw
+        prices: Dict[str, ModelPrice] = {}
+        as_of, source = "", ""
+        if table == BUILTIN:
+            bundled = load_builtin_prices()
+            as_of = str(bundled.get("as_of") or "")
+            source = str(bundled.get("source") or "")
+            for name, spec in (bundled.get("models") or {}).items():
+                prices[name] = ModelPrice(**spec)
+        if isinstance(raw, dict):
+            for name, spec in raw.items():
+                if name != BUILTIN:
+                    prices[name] = ModelPrice(**spec)
+        self.pricing = prices
+        self.pricing_as_of = as_of
+        self.pricing_source = source
+        self.pricing_table = table if prices else "none"
+        return self.pricing_table
 
     def price_for(self, model: str) -> Optional[ModelPrice]:
         if model in self.pricing:
@@ -296,9 +353,33 @@ class Config:
         routing = build(RoutingConfig, routing_raw)
         routing.weights = weights
 
-        pricing = {
-            name: build(ModelPrice, spec) for name, spec in (raw.get("pricing") or {}).items()
-        }
+        # `pricing: builtin` takes the dated table that ships with the release.
+        # A mapping may also set `builtin: true` alongside its own entries, which
+        # then override it model by model.
+        raw_pricing = raw.get("pricing")
+        pricing: Dict[str, ModelPrice] = {}
+        as_of, source = "", ""
+        wants_builtin = raw_pricing == BUILTIN or (
+            isinstance(raw_pricing, dict) and bool(raw_pricing.get(BUILTIN))
+        )
+        if wants_builtin:
+            bundled = load_builtin_prices()
+            as_of = str(bundled.get("as_of") or "")
+            source = str(bundled.get("source") or "")
+            pricing.update(
+                {name: build(ModelPrice, spec)
+                 for name, spec in (bundled.get("models") or {}).items()}
+            )
+        elif isinstance(raw_pricing, str):
+            raise ConfigError(
+                f"pricing: {raw_pricing!r} is not a thing. Use `pricing: builtin` for the "
+                "table that ships with this release, or a mapping of model to prices."
+            )
+        if isinstance(raw_pricing, dict):
+            pricing.update(
+                {name: build(ModelPrice, spec)
+                 for name, spec in raw_pricing.items() if name != BUILTIN}
+            )
         accounts = [build(AccountConfig, a) for a in (raw.get("accounts") or [])]
         keys = [build(KeyConfig, k) for k in (raw.get("keys") or [])]
 
@@ -335,6 +416,12 @@ class Config:
             accounts=accounts,
             keys=keys,
             pricing=pricing,
+            pricing_as_of=as_of,
+            pricing_source=source,
+            pricing_table=(
+                BUILTIN if wants_builtin else ("config" if pricing else "none")
+            ),
+            pricing_raw=raw_pricing if isinstance(raw_pricing, dict) else None,
             path=path,
         )
 

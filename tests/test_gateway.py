@@ -7,10 +7,7 @@ import time
 
 import pytest
 from conftest import body
-
-from tokenbiryani.core.account import AccountState
-from tokenbiryani.core.gateway import GatewayError
-from tokenbiryani.testing.mock_upstream import (
+from support.mock_upstream import (
     auth_error,
     invalid_request,
     model_not_permitted,
@@ -20,6 +17,9 @@ from tokenbiryani.testing.mock_upstream import (
     server_error,
     transport_error,
 )
+
+from tokenbiryani.core.account import AccountState
+from tokenbiryani.core.gateway import GatewayError
 
 
 async def test_happy_path(gateway_factory, mock, key):
