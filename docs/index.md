@@ -37,3 +37,5 @@ sit in a hot path.
 The one exception is the Bedrock and Vertex adapters, which must move the model into
 the URL. That translation lives in one file and nowhere else — see
 [Account types](providers.md).
+
+<!-- verifying the changelog gate; this branch is deleted afterwards -->
