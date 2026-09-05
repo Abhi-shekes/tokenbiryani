@@ -98,6 +98,20 @@ class RoutingConfig:
     #: multiplied into every token estimate before it becomes a lease
     estimate_safety_margin: float = 1.15
 
+    #: How the output half of a lease is sized. `adaptive` predicts from what each
+    #: model has actually been returning and is bounded by the caller's own
+    #: `max_tokens`, so it can only ever reserve less; `max_tokens` reserves the
+    #: ceiling, which is what this did before the estimator existed.
+    output_estimate: str = "adaptive"
+    output_estimate_quantile: float = 0.95
+    output_estimate_min_samples: int = 20
+    output_estimate_window: int = 200
+    output_estimate_floor: int = 256
+    #: Stop predicting for a model once this fraction of its recent completions have
+    #: outrun their lease. A p95 predictor is beaten ~5% of the time by design; this
+    #: catches a distribution that has changed shape.
+    output_estimate_max_undershoot: float = 0.20
+
 
 @dataclass
 class RetryConfig:

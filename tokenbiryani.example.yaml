@@ -18,6 +18,17 @@ routing:
   # Token estimates are multiplied by this before becoming a lease. Above 1.0 means
   # reserving slightly too much, which is the safe direction.
   estimate_safety_margin: 1.15
+  # How the output half of a lease is sized.
+  #   adaptive   — predict from what each model has actually been returning, bounded
+  #                by the caller's own max_tokens, so it can only ever reserve less
+  #   max_tokens — reserve the caller's ceiling, which an agent client sets far above
+  #                what it ever receives
+  output_estimate: adaptive
+  output_estimate_quantile: 0.95      # reserve for the tail, not the median
+  output_estimate_min_samples: 20     # below this, the ceiling is used
+  output_estimate_window: 200         # completions per model that take part
+  output_estimate_floor: 256          # never predict below this
+  output_estimate_max_undershoot: 0.20  # beaten more often than this, stop predicting
   weights:
     affinity: 0.40
     headroom: 0.40

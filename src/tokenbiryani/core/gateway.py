@@ -44,6 +44,7 @@ from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
 from .diagnostics import inspect_headers, looks_unified
+from .estimator import OutputEstimator
 from .keys import KeyRegistry, generate_key, record_from_config
 from .limits import LimitMirror, TokenEstimate, estimate_request
 from .oauth import OAuthClient, OAuthError, OAuthTokens, PendingLogin, make_verifier
@@ -120,6 +121,19 @@ def _response_headers(upstream_headers: Mapping[str, str], account_id: str) -> D
     return out
 
 
+def _build_estimator(config: Config) -> OutputEstimator:
+    """One estimator per gateway, configured from `routing.*`."""
+    routing = config.routing
+    return OutputEstimator(
+        mode=routing.output_estimate,
+        quantile=routing.output_estimate_quantile,
+        min_samples=routing.output_estimate_min_samples,
+        window=routing.output_estimate_window,
+        floor=routing.output_estimate_floor,
+        max_undershoot=routing.output_estimate_max_undershoot,
+    )
+
+
 class Gateway:
     def __init__(
         self,
@@ -133,6 +147,7 @@ class Gateway:
         self.events = EventLog(config.observability.event_buffer)
         self.gate = CapacityGate(config.queue.max_size, config.queue.default_max_wait_seconds)
         self.router = Router(config.routing.strategy, config.routing.weights)
+        self.estimator = _build_estimator(config)
 
         self.accounts: Dict[str, AccountRuntime] = {}
         self.upstreams: Dict[str, Upstream] = {}
@@ -1139,6 +1154,7 @@ class Gateway:
         self.keys = KeyRegistry(config.keys)
         self.keys.set_managed(managed)
         self.router = Router(config.routing.strategy, config.routing.weights)
+        self.estimator = _build_estimator(config)
         self.gate.max_size = config.queue.max_size
         self.gate.default_max_wait = config.queue.default_max_wait_seconds
         self._file_pricing_table = config.pricing_table
@@ -1349,7 +1365,11 @@ class Gateway:
 
         session = compute_session_key(body, headers, scope=key.name)
         owner = await self.store.get_affinity(session)
-        estimate = estimate_request(body, self.config.routing.estimate_safety_margin)
+        estimate = estimate_request(
+            body,
+            self.config.routing.estimate_safety_margin,
+            predictor=self.estimator.predict,
+        )
         request_id = "req_" + uuid.uuid4().hex[:20]
 
         event = RequestEvent(
@@ -1757,6 +1777,9 @@ class Gateway:
     ) -> None:
         """Record a success: stats, affinity, spend, and the event."""
         now = time.time()
+        # What the model really returned, against what its lease reserved. The lease
+        # is the number that decided whether this account looked full.
+        self.estimator.observe(plan.model, plan.estimate.output_tokens, usage.output_tokens)
         price = self.config.price_for(plan.model)
         cost = account.record_success(latency, usage, price, now, cost_multiplier)
 

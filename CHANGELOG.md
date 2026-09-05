@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `routing.output_estimate: adaptive` (the new default) sizes the output half of a
+  lease from what each model has actually been returning, instead of the caller's
+  `max_tokens`. Bounded three ways: never above the caller's own ceiling, the ceiling
+  until 20 samples exist, and the ceiling again if the prediction is being outrun more
+  than `output_estimate_max_undershoot` of the time. `output_estimate: max_tokens`
+  restores the previous behaviour.
+- `GET /admin/estimation` reports what the estimator believes per model — sample
+  count, median, p95, undershoot rate, and whether it is predicting at all.
 - Session affinity keys are namespaced by the virtual key that presented the
   request. `session_key()` takes a `scope`, and the gateway passes `key.name`.
 - `StateStore.clear_affinity_for_account()`, implemented on all three backends, so

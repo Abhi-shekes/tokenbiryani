@@ -204,6 +204,16 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         authenticate_admin(request)
         return JSONResponse(app.state.gateway.capacity_horizon())
 
+    @app.get("/admin/estimation")
+    async def estimation(request: Request) -> JSONResponse:
+        """What the output estimator has learned, per model.
+
+        Worth looking at before trusting it: `predicting: false` on a model means
+        every request for it is still leasing the caller's full `max_tokens`.
+        """
+        authenticate_admin(request)
+        return JSONResponse(app.state.gateway.estimator.snapshot())
+
     @app.get("/admin/usage")
     async def usage(
         request: Request,
