@@ -84,6 +84,34 @@ class OutputEstimator:
     def enabled(self) -> bool:
         return self.mode == MODE_ADAPTIVE
 
+    def reconfigure(
+        self,
+        mode: str,
+        quantile: float,
+        min_samples: int,
+        window: int,
+        floor: int,
+        max_undershoot: float,
+    ) -> None:
+        """Apply new settings without forgetting what has been learned.
+
+        A config reload must not send the pool back to leasing ceilings for the next
+        twenty requests of every model. The samples are observed state, not
+        configuration, and they survive exactly as managed keys do.
+        """
+        self.mode = mode
+        self.quantile = min(1.0, max(0.5, float(quantile)))
+        self.min_samples = max(1, int(min_samples))
+        self.floor = max(1, int(floor))
+        self.max_undershoot = max(0.0, min(1.0, float(max_undershoot)))
+        new_window = max(self.min_samples, int(window))
+        if new_window != self.window:
+            self.window = new_window
+            for model, sizes in list(self._samples.items()):
+                self._samples[model] = deque(sizes, maxlen=new_window)
+            for model, missed in list(self._undershoots.items()):
+                self._undershoots[model] = deque(missed, maxlen=new_window)
+
     def predict(self, model: str, ceiling: int) -> int:
         """What to lease for this request. Never more than `ceiling`.
 

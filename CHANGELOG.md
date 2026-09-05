@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `GET /admin/cache-advice` separates the two reasons a cache hit rate is zero: a
+  client that never sent a `cache_control` breakpoint, which no routing change can
+  fix, and a breakpoint that is present while affinity keeps breaking, which is the
+  routing problem the rest of the gateway already diagnoses. Reported per virtual key
+  and model, with a verdict. Booleans and token counts only — no prompt content is
+  kept.
+- `cache.auto_breakpoint` (default `false`) adds the marker itself at the end of the
+  stable head, for callers that will not. Off by default and documented as the third
+  exception to routing rather than rewriting, after the two fields Bedrock and Vertex
+  need.
 - `routing.output_estimate: adaptive` (the new default) sizes the output half of a
   lease from what each model has actually been returning, instead of the caller's
   `max_tokens`. Bounded three ways: never above the caller's own ceiling, the ceiling

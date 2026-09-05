@@ -37,6 +37,16 @@ routing:
     errors: 0.20
     cost: 0.10
 
+cache:
+  # Add a cache_control breakpoint to requests that carry none, at the end of the
+  # stable head. OFF by default and best left off: everywhere else this gateway
+  # routes rather than rewrites, and this makes it the third exception to that after
+  # the two fields Bedrock and Vertex need. Diagnosis (GET /admin/cache-advice) works
+  # either way and costs nothing.
+  auto_breakpoint: false
+  # Requests per (key, model) before the advisor will express an opinion.
+  advice_min_requests: 20
+
 retry:
   max_attempts: 3
   max_accounts: 3

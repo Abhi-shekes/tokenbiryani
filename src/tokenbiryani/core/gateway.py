@@ -43,6 +43,12 @@ from ..store.base import SCOPE_ACCOUNT, SCOPE_KEY, StateStore, build_store
 from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
+from .cacheadvice import (
+    CacheAdvisor,
+    cacheable_prefix_tokens,
+    has_cache_breakpoint,
+    insert_cache_breakpoint,
+)
 from .diagnostics import inspect_headers, looks_unified
 from .estimator import OutputEstimator
 from .keys import KeyRegistry, generate_key, record_from_config
@@ -148,6 +154,9 @@ class Gateway:
         self.gate = CapacityGate(config.queue.max_size, config.queue.default_max_wait_seconds)
         self.router = Router(config.routing.strategy, config.routing.weights)
         self.estimator = _build_estimator(config)
+        self.cache_advisor = CacheAdvisor(
+            min_requests=config.cache.advice_min_requests
+        )
 
         self.accounts: Dict[str, AccountRuntime] = {}
         self.upstreams: Dict[str, Upstream] = {}
@@ -1154,7 +1163,19 @@ class Gateway:
         self.keys = KeyRegistry(config.keys)
         self.keys.set_managed(managed)
         self.router = Router(config.routing.strategy, config.routing.weights)
-        self.estimator = _build_estimator(config)
+        # Reconfigured, not rebuilt: what the estimator has learned about each model
+        # and what the advisor has counted are observed state, and a reload must not
+        # send the pool back to leasing ceilings for twenty requests of every model.
+        # Managed keys are preserved a few lines above for the same reason.
+        self.estimator.reconfigure(
+            mode=config.routing.output_estimate,
+            quantile=config.routing.output_estimate_quantile,
+            min_samples=config.routing.output_estimate_min_samples,
+            window=config.routing.output_estimate_window,
+            floor=config.routing.output_estimate_floor,
+            max_undershoot=config.routing.output_estimate_max_undershoot,
+        )
+        self.cache_advisor.reconfigure(config.cache.advice_min_requests)
         self.gate.max_size = config.queue.max_size
         self.gate.default_max_wait = config.queue.default_max_wait_seconds
         self._file_pricing_table = config.pricing_table
@@ -1363,6 +1384,15 @@ class Gateway:
             else self.config.queue.default_max_wait_seconds,
         )
 
+        # Diagnosis before dispatch: whether the caller asked for caching at all,
+        # and how much stable head a breakpoint would have covered. Booleans and
+        # token counts only — the body itself is never kept.
+        marked = has_cache_breakpoint(body)
+        prefix_tokens = cacheable_prefix_tokens(body)
+        if not marked and self.config.cache.auto_breakpoint:
+            body, inserted = insert_cache_breakpoint(body)
+            marked = inserted
+
         session = compute_session_key(body, headers, scope=key.name)
         owner = await self.store.get_affinity(session)
         estimate = estimate_request(
@@ -1381,6 +1411,8 @@ class Gateway:
             streamed=streamed,
         )
         event.priority = priority_name(priority)
+        event.cache_breakpoint = marked
+        event.prefix_tokens = prefix_tokens
         return _Plan(
             body=body,
             headers=dict(headers),
@@ -1780,6 +1812,15 @@ class Gateway:
         # What the model really returned, against what its lease reserved. The lease
         # is the number that decided whether this account looked full.
         self.estimator.observe(plan.model, plan.estimate.output_tokens, usage.output_tokens)
+        self.cache_advisor.observe(
+            plan.key.name,
+            plan.model,
+            plan.event.cache_breakpoint,
+            plan.event.prefix_tokens,
+            usage.input_tokens,
+            usage.cache_read_tokens,
+            usage.cache_creation_tokens,
+        )
         price = self.config.price_for(plan.model)
         cost = account.record_success(latency, usage, price, now, cost_multiplier)
 

@@ -246,6 +246,19 @@ class StoreConfig:
 
 
 @dataclass
+class CacheConfig:
+    """Prompt-cache diagnosis, and the one opt-in that acts on it."""
+
+    #: Rewrite the caller's body to add a `cache_control` breakpoint at the end of
+    #: the stable head when it carries none. Off by default: everywhere else this
+    #: gateway routes rather than rewrites, and turning this on makes it the third
+    #: exception to that after the two fields Bedrock and Vertex need.
+    auto_breakpoint: bool = False
+    #: Requests per (key, model) before the advisor will express an opinion.
+    advice_min_requests: int = 20
+
+
+@dataclass
 class SpendConfig:
     """Spend caps are windowed, not lifetime.
 
@@ -301,6 +314,7 @@ class Config:
     batch: BatchConfig = field(default_factory=BatchConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
     spend: SpendConfig = field(default_factory=SpendConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     oauth: OAuthConfig = field(default_factory=OAuthConfig)
     accounts: List[AccountConfig] = field(default_factory=list)
@@ -429,6 +443,7 @@ class Config:
             batch=build(BatchConfig, raw.get("batch")),
             store=build(StoreConfig, raw.get("store")),
             spend=build(SpendConfig, raw.get("spend")),
+            cache=build(CacheConfig, raw.get("cache")),
             observability=build(ObservabilityConfig, raw.get("observability")),
             oauth=build(OAuthConfig, raw.get("oauth")),
             accounts=accounts,

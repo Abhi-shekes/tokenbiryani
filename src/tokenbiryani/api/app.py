@@ -214,6 +214,16 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         authenticate_admin(request)
         return JSONResponse(app.state.gateway.estimator.snapshot())
 
+    @app.get("/admin/cache-advice")
+    async def cache_advice(request: Request) -> JSONResponse:
+        """Why the cache hit rate is what it is, per virtual key and model.
+
+        The distinction the hit rate alone cannot make: a client that never marked a
+        breakpoint is not a routing problem and no strategy change will help it.
+        """
+        authenticate_admin(request)
+        return JSONResponse(app.state.gateway.cache_advisor.advice())
+
     @app.get("/admin/usage")
     async def usage(
         request: Request,

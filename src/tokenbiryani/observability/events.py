@@ -51,6 +51,11 @@ class RequestEvent:
     saved_usd: Optional[float] = None
     affinity_broken: bool = False
     affinity_honored: bool = False
+    #: Whether the caller marked anything with `cache_control`. None when the
+    #: request never got far enough to be inspected.
+    cache_breakpoint: Optional[bool] = None
+    #: Rough size of the stable head — the part a breakpoint would cover.
+    prefix_tokens: int = 0
     decision: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 

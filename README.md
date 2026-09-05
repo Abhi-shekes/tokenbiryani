@@ -260,6 +260,8 @@ tokenbiryani status --json   # same data, for scripts
 | `POST /admin/reload` | re-read the config file |
 | `GET /admin/requests/{id}` | **why that request went where it did** — attempt chain, per-candidate scores, verdicts |
 | `GET /admin/horizon` | projected capacity for the next hour |
+| `GET /admin/estimation` | what the output estimator has learned, per model |
+| `GET /admin/cache-advice` | **why the cache hit rate is what it is** — whether the client ever sent a breakpoint, per key and model |
 | `GET /admin/events` | live SSE feed |
 
 The request inspector is the point. `filtered — cooling, 27s remaining` is a complete

@@ -32,6 +32,34 @@ ignores affinity visits every account once per conversation, so they take the sa
 number of misses. The penalty is inherent to cache-blindness, not a quirk of
 round-robin.
 
+## Is it even switched on?
+
+Anthropic's cache engages only where the request carries a `cache_control` marker.
+A client that never sets one pays full price on every turn no matter how the gateway
+routes, and that looks exactly like a routing failure: cache hit 0%.
+
+The hit rate cannot tell the two apart, so `GET /admin/cache-advice` does. Per virtual
+key and model it reports how often a breakpoint was present, how big the stable head
+is, the realised hit rate, and a verdict:
+
+| Verdict | Means |
+|---|---|
+| no `cache_control` breakpoint on a stable prefix of about N tokens | a client problem. **No routing strategy can recover it.** |
+| breakpoints are being sent but the hit rate is low | a routing problem — read the rest of this page |
+| the stable prefix is too small to cache | nothing to fix |
+| caching is engaged and working | nothing to do |
+
+`cache.auto_breakpoint: true` makes the gateway add the marker itself, at the end of
+the stable head — the last tool if there are tools, otherwise the system prompt. It
+is **off by default and should stay off unless you need it**: everywhere else this
+gateway routes rather than rewrites, and turning it on makes it the third exception
+to that rule after the two fields Bedrock and Vertex require. It never touches a
+request that already has a breakpoint, and never one whose prefix is too short for
+Anthropic to cache.
+
+None of this keeps prompt content. The body is read in memory and dropped; what is
+recorded is a boolean and a token count.
+
 ## What to check
 
 1. **Your strategy.** `sticky_headroom` is the default for this reason. `headroom`,
