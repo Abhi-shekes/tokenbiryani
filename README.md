@@ -262,6 +262,7 @@ tokenbiryani status --json   # same data, for scripts
 | `GET /admin/horizon` | projected capacity for the next hour |
 | `GET /admin/estimation` | what the output estimator has learned, per model |
 | `GET /admin/pacing` | **is this pool on course to spend its week** — or run dry early, or strand quota |
+| `GET /admin/sessions` | the most expensive conversations in the window, runaways flagged |
 | `GET /admin/cache-advice` | **why the cache hit rate is what it is** — whether the client ever sent a breakpoint, per key and model |
 | `GET /admin/events` | live SSE feed |
 
@@ -346,6 +347,13 @@ accounts:
 Per-key defaults for the last two live under `keys:` as `priority` and `max_wait_seconds`.
 
 ### Spend caps
+
+Caps come at two scopes. `keys[].spend_cap_usd` bounds everything a key does;
+`session_cap_usd` and `session_max_turns` bound one *conversation* inside that
+allowance. The second exists because the first cannot see a runaway: one agent loop
+resending a large prefix a few hundred times is a whole key's cap with that key's
+name on it, and until it trips there is nothing to look at. `GET /admin/sessions`
+ranks conversations by cost and flags the ones past `sessions.runaway_turns`.
 
 Caps are **windowed, not lifetime** (`spend.window_hours`, default 24). A lifetime cap on
 a persistent store would eventually wedge the gateway shut and stay that way.

@@ -37,6 +37,17 @@ routing:
     errors: 0.20
     cost: 0.10
 
+sessions:
+  # Per-conversation cost and turn accounting, on the same spend ledger. Two extra
+  # ledger rows per request — that is what the per-session caps below and the runaway
+  # report are made of. Off, and both go quiet rather than lying.
+  track: true
+  # What GET /admin/sessions flags. These report; they enforce nothing on their own —
+  # keys[].session_cap_usd and keys[].session_max_turns do that.
+  runaway_turns: 200
+  # runaway_spend_usd: 10
+  report_limit: 20
+
 pacing:
   # Whether the pool is on course to spend its quota window, run dry early, or reach
   # the end of the week with quota unused. Advisory reports and changes nothing.
@@ -208,6 +219,12 @@ keys:
     pool: []             # empty means every account
     rpm: null
     spend_cap_usd: null
+    # Per-conversation limits. spend_cap_usd above bounds everything this key does;
+    # these bound one conversation inside it, which is what catches a runaway agent
+    # loop before it spends the key's whole allowance on a single session. Both need
+    # sessions.track.
+    session_cap_usd: null
+    session_max_turns: null
     # Required to reach /admin/* — pool snapshot, request inspector, key management.
     # Issue tenant keys without it: /admin exposes account ids and spend.
     admin: false

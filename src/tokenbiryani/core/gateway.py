@@ -39,7 +39,14 @@ from ..proxy.errors import (
     classify,
     classify_exception,
 )
-from ..store.base import SCOPE_ACCOUNT, SCOPE_KEY, StateStore, build_store
+from ..store.base import (
+    SCOPE_ACCOUNT,
+    SCOPE_KEY,
+    SCOPE_SESSION,
+    SCOPE_SESSION_TURNS,
+    StateStore,
+    build_store,
+)
 from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
@@ -1050,6 +1057,8 @@ class Gateway:
             spend_cap_usd=options.get("spend_cap_usd"),
             priority=str(options.get("priority") or "interactive"),
             max_wait_seconds=options.get("max_wait_seconds"),
+            session_cap_usd=options.get("session_cap_usd"),
+            session_max_turns=options.get("session_max_turns"),
             admin=bool(options.get("admin")),
         )
         record = record_from_config(template, plaintext)
@@ -1064,6 +1073,7 @@ class Gateway:
     #: is not an edit anybody should be able to make by typo.
     KEY_EDITABLE = (
         "models", "pool", "rpm", "spend_cap_usd", "priority", "max_wait_seconds",
+        "session_cap_usd", "session_max_turns",
     )
 
     async def update_key(self, name: str, **changes: Any) -> Dict[str, Any]:
@@ -1425,6 +1435,7 @@ class Gateway:
             marked = inserted
 
         session = compute_session_key(body, headers, scope=key.name)
+        await self._check_session_caps(key, session)
         owner = await self.store.get_affinity(session)
         estimate = estimate_request(
             body,
@@ -1493,6 +1504,84 @@ class Gateway:
             waited = time.time() - started
             plan.queued_seconds += waited
             plan.event.paced_for = round(waited, 3)
+
+    async def _check_session_caps(self, key: KeyConfig, session: str) -> None:
+        """Bound one conversation, where `spend_cap_usd` bounds the whole key.
+
+        A key cap catches a tenant overspending across everything they do. Nothing
+        caught a single agent loop doing it inside that allowance, and one loop
+        resending a large prefix a few hundred times can be the whole cap with one
+        key's name on it — visible only afterwards, in a chart.
+        """
+        if not self.config.sessions.track:
+            return
+        window = self.config.spend.window_seconds
+
+        if key.session_max_turns is not None:
+            turns = await self.store.get_spend(SCOPE_SESSION_TURNS, session, window)
+            if turns >= key.session_max_turns:
+                raise GatewayError(
+                    429,
+                    f"this conversation has run {int(turns)} turns, at the "
+                    f"{key.session_max_turns}-turn limit for key {key.name!r}. Start "
+                    "a new conversation, or raise session_max_turns",
+                    kind="rate_limit_error",
+                )
+
+        if key.session_cap_usd is not None:
+            spent = await self.store.get_spend(SCOPE_SESSION, session, window)
+            if spent >= key.session_cap_usd:
+                raise GatewayError(
+                    429,
+                    f"this conversation has spent ${spent:.2f} of its "
+                    f"${key.session_cap_usd:.2f} limit for key {key.name!r} in the "
+                    f"last {self.config.spend.window_hours:.0f}h",
+                    kind="rate_limit_error",
+                )
+
+    async def sessions_report(self) -> Dict[str, Any]:
+        """The most expensive conversations in the spend window, worst first.
+
+        Sessions are unbounded in number, so this reports the tail that matters
+        rather than all of them: what a runaway looks like is one session far above
+        every other, and that is visible in twenty rows.
+        """
+        settings = self.config.sessions
+        if not settings.track:
+            return {"tracking": False, "sessions": []}
+
+        window = self.config.spend.window_seconds
+        spend = await self.store.spend_by_scope(SCOPE_SESSION, window)
+        turns = await self.store.spend_by_scope(SCOPE_SESSION_TURNS, window)
+
+        rows: List[Dict[str, Any]] = []
+        for session in set(spend) | set(turns):
+            session_turns = int(turns.get(session, 0.0))
+            session_spend = float(spend.get(session, 0.0))
+            reasons = []
+            if settings.runaway_turns and session_turns >= settings.runaway_turns:
+                reasons.append(f"{session_turns} turns")
+            if (
+                settings.runaway_spend_usd
+                and session_spend >= settings.runaway_spend_usd
+            ):
+                reasons.append(f"${session_spend:.2f}")
+            rows.append({
+                "session_key": session,
+                "turns": session_turns,
+                "spend_usd": round(session_spend, 6),
+                "runaway": bool(reasons),
+                "why": ", ".join(reasons),
+            })
+
+        rows.sort(key=lambda row: (row["spend_usd"], row["turns"]), reverse=True)
+        return {
+            "tracking": True,
+            "window_seconds": window,
+            "runaway_turns": settings.runaway_turns,
+            "runaway_spend_usd": settings.runaway_spend_usd,
+            "sessions": rows[: max(1, settings.report_limit)],
+        }
 
     async def _acquire(self, plan: _Plan) -> Tuple[AccountRuntime, Decision]:
         """Route, or wait on the queue for capacity that is known to be coming."""
@@ -1898,6 +1987,14 @@ class Gateway:
         if cost is not None:
             await self.store.add_spend(SCOPE_KEY, plan.key.name, cost)
             await self.store.add_spend(SCOPE_ACCOUNT, account.id, cost)
+
+        if self.config.sessions.track:
+            # A turn is recorded whether or not the model was priced: a runaway loop
+            # on an unpriced model is still a runaway loop, and a turn cap that only
+            # worked for priced models would fail exactly where the cost is unknown.
+            await self.store.add_spend(SCOPE_SESSION_TURNS, plan.session, 1.0)
+            if cost is not None:
+                await self.store.add_spend(SCOPE_SESSION, plan.session, cost)
 
         saved = None
         if price is not None and usage.cache_read_tokens:

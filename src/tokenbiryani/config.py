@@ -178,6 +178,11 @@ class KeyConfig:
     #: How long this key's requests will wait for capacity before being told to
     #: come back. Falls back to queue.default_max_wait_seconds.
     max_wait_seconds: Optional[float] = None
+    #: Per-conversation caps. `spend_cap_usd` above bounds the whole key; these
+    #: bound one conversation within it, which is what catches a runaway agent loop
+    #: before it spends the key's entire allowance on a single session.
+    session_cap_usd: Optional[float] = None
+    session_max_turns: Optional[int] = None
     #: Required to reach /admin/*. A tenant key must not be able to read the pool's
     #: account ids and spend, let alone mint more keys.
     admin: bool = False
@@ -243,6 +248,22 @@ class StoreConfig:
     secret_key_path: str = "tokenbiryani.key"
     url: str = "redis://127.0.0.1:6379/0"
     namespace: str = "tokenbiryani"
+
+
+@dataclass
+class SessionConfig:
+    """Per-conversation accounting, and what counts as a runaway."""
+
+    #: Record per-session cost and turn count on the spend ledger. Two extra ledger
+    #: rows per request, which is what per-session caps and the runaway report are
+    #: made of. Turn it off and both go quiet rather than lying.
+    track: bool = True
+    #: Thresholds the runaway report flags at. They enforce nothing on their own —
+    #: `keys[].session_cap_usd` and `session_max_turns` do that.
+    runaway_turns: int = 200
+    runaway_spend_usd: Optional[float] = None
+    #: How many sessions the report returns, worst first.
+    report_limit: int = 20
 
 
 @dataclass
@@ -343,6 +364,7 @@ class Config:
     spend: SpendConfig = field(default_factory=SpendConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     pacing: PacingConfig = field(default_factory=PacingConfig)
+    sessions: SessionConfig = field(default_factory=SessionConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     oauth: OAuthConfig = field(default_factory=OAuthConfig)
     accounts: List[AccountConfig] = field(default_factory=list)
@@ -473,6 +495,7 @@ class Config:
             spend=build(SpendConfig, raw.get("spend")),
             cache=build(CacheConfig, raw.get("cache")),
             pacing=build(PacingConfig, raw.get("pacing")),
+            sessions=build(SessionConfig, raw.get("sessions")),
             observability=build(ObservabilityConfig, raw.get("observability")),
             oauth=build(OAuthConfig, raw.get("oauth")),
             accounts=accounts,

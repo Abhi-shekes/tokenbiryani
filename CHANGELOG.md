@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Per-conversation budgets. `keys[].session_cap_usd` and `keys[].session_max_turns`
+  bound one conversation inside a key's allowance, where `spend_cap_usd` bounds
+  everything the key does. Enforced across instances, because the counters ride the
+  existing spend ledger rather than a per-process dict.
+- `GET /admin/sessions` ranks conversations by cost in the spend window and flags the
+  ones past `sessions.runaway_turns` or `sessions.runaway_spend_usd`.
+- `sessions.track` (default `true`) records per-session cost and turn count — two
+  extra ledger rows per request, which is what the caps and the report are made of.
+  Turning it off makes both go quiet rather than report zeroes; the caps stop being
+  enforced with it, which is stated in the docs rather than left to be discovered.
 - Quota pacing. `GET /admin/pacing` answers a question nothing else here answered:
   not "is there capacity now" but "should this be spent now". It reports, per scope,
   how far through the quota window we are against how much of the quota is gone, and

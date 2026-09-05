@@ -18,6 +18,18 @@ from typing import Dict, List, Optional
 SCOPE_KEY = "key"
 SCOPE_ACCOUNT = "account"
 
+#: One conversation's cost. A key cap catches a tenant overspending; nothing caught
+#: a single agent loop doing it, and one loop resending a 100k-token prefix a few
+#: hundred times is a whole week of quota with one virtual key's name on it.
+SCOPE_SESSION = "session"
+
+#: Turn *count* per conversation, carried on the same ledger with an amount of 1.0
+#: rather than a table of its own. The ledger is already (scope, name, at, amount)
+#: with a window query over it, which is exactly what counting turns in a window
+#: needs — and it means turn caps hold across instances on Redis for free, where a
+#: counter kept in the process would not.
+SCOPE_SESSION_TURNS = "session_turns"
+
 
 class StateStore(abc.ABC):
     @abc.abstractmethod

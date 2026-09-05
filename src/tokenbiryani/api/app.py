@@ -214,6 +214,16 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         authenticate_admin(request)
         return JSONResponse(app.state.gateway.estimator.snapshot())
 
+    @app.get("/admin/sessions")
+    async def sessions(request: Request) -> JSONResponse:
+        """The most expensive conversations in the spend window, worst first.
+
+        A key cap catches a tenant overspending. This is what catches one agent
+        loop doing it inside that allowance.
+        """
+        authenticate_admin(request)
+        return JSONResponse(await app.state.gateway.sessions_report())
+
     @app.get("/admin/pacing")
     async def pacing(request: Request) -> JSONResponse:
         """Whether this pool is on course to spend its quota window, or to run dry
@@ -492,6 +502,8 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
             spend_cap_usd=payload.get("spend_cap_usd"),
             priority=payload.get("priority"),
             max_wait_seconds=payload.get("max_wait_seconds"),
+            session_cap_usd=payload.get("session_cap_usd"),
+            session_max_turns=payload.get("session_max_turns"),
             admin=payload.get("admin"),
         )
         # The only time the plaintext exists outside the caller's hands.
