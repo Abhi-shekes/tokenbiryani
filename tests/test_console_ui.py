@@ -422,3 +422,41 @@ def test_a_gateway_that_stops_answering_is_said_so_not_hidden(page, live):
     finally:
         context.set_offline(False)
         context.close()
+
+
+def test_a_rejected_key_costs_one_request_not_five(page, live):
+    """signIn used to start the poll and the event stream before knowing the key was
+    any good, so a wrong key produced 401s on status, horizon, requests and events
+    before the screen said anything. The stream then retried the refused key on its
+    own timer.
+    """
+    context = page.context.browser.new_context(viewport={"width": 1280, "height": 900})
+    visitor = context.new_page()
+    refused = []
+    visitor.on("response",
+               lambda r: refused.append(r.url) if r.status in (401, 403) else None)
+    try:
+        visitor.goto(live + "/console", wait_until="networkidle")
+        # The boot probe is one 401 by design: it is how an open gateway is detected.
+        assert len(refused) == 1, refused
+        refused.clear()
+
+        visitor.fill("#gate-key", "bir_not_a_real_key_000000")
+        visitor.click("#gate-go")
+        visitor.wait_for_selector("#gate-msg .note.err", timeout=15000)
+        visitor.wait_for_timeout(4000)   # long enough for a retry loop to show itself
+
+        assert len(refused) == 1, f"one rejected request, got {len(refused)}: {refused}"
+        message = visitor.inner_text("#gate-msg")
+        assert "rejected" in message
+        assert "TOKENBIRYANI_KEY" in message, "say where the right key lives"
+        assert not visitor.is_hidden("#gate"), "and stay on the landing page"
+
+        # The real key still works from the same screen.
+        refused.clear()
+        visitor.fill("#gate-key", "bir_test")
+        visitor.click("#gate-go")
+        visitor.wait_for_selector("#accounts-wrap tr[data-account]", timeout=15000)
+        assert refused == []
+    finally:
+        context.close()

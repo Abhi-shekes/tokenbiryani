@@ -103,6 +103,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docker/tokenbiryani.yaml` is in the repository. An unanchored `tokenbiryani.yaml`
   ignore rule matched it at every depth, so the file `docker compose up` mounts was
   never committed and a fresh clone could not start the stack.
+- A rejected key costs one request instead of five, and says where the right key
+  lives. Signing in used to start the poll and the event stream before knowing the
+  key was any good, and the stream then retried the refused key on its own timer.
+- `serve` prints the key names this gateway accepts, masked — enough to see that the
+  key in your browser belongs to a different gateway, never enough to use one.
 - The console now says when the gateway has stopped answering, instead of polling it
   forever while the live chip read "polling" and pre-outage numbers sat there looking
   current. It names the address, dims the stale panel, backs off to a 30s cap, offers

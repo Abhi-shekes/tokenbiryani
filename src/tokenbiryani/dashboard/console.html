@@ -1796,6 +1796,13 @@ async function connectStream() {
     const response = await fetch("/admin/events", {
       headers: { "x-api-key": state.key }, signal: controller.signal
     });
+    if (response.status === 401 || response.status === 403) {
+      // Not transient. Retrying a key the gateway has refused just repeats the 401
+      // every few seconds against a console that has already been signed out.
+      signOut(response.status === 403
+        ? "That key is not an admin key." : "That key was rejected.");
+      return;
+    }
     if (!response.ok || !response.body) throw new Error("no stream");
     state.streamDelay = 2500;
     setLive(true);
@@ -1871,8 +1878,33 @@ function show(name) {
   if (name === "usage") loadUsage();
 }
 
-function signIn(key) {
+/**
+ * @param {string} key
+ * @param {boolean} [validated] true when the caller already proved the key works.
+ *
+ * Unvalidated, this checks the key with a single request before starting anything.
+ * It used to launch the poll and the event stream immediately, so a rejected key
+ * produced five 401s — status, horizon, requests, events, and the one that finally
+ * signed you out — before the screen said a word.
+ */
+async function signIn(key, validated) {
   state.key = key;
+  if (!validated) {
+    const button = el("gate-go");
+    if (button) { button.disabled = true; button.textContent = "Connecting…"; }
+    try {
+      await api("/admin/status");            // api() signs out on 401 and 403
+    } catch (error) {
+      if (error.offline) {
+        el("gate-msg").innerHTML = `<div class="note err"><span>Cannot reach a gateway
+          at <b class="mono">${esc(location.host)}</b>. Is it running?</span></div>`;
+      }
+      state.key = "";
+      return;
+    } finally {
+      if (button) { button.disabled = false; button.textContent = "Open the console"; }
+    }
+  }
   state.open = true;
   try { localStorage.setItem(KEY_STORE, key); } catch (e) { /* private mode */ }
   el("gate").classList.add("hidden");
@@ -1909,7 +1941,13 @@ function signOut(message) {
   el("app").classList.add("hidden");
   el("onboarding").classList.add("hidden");
   el("gate").classList.remove("hidden");
-  el("gate-msg").innerHTML = message ? `<div class="note err">${esc(message)}</div>` : "";
+  el("gate-msg").innerHTML = message
+    ? `<div class="note err"><span>${esc(message)} It has to be a key this gateway
+        knows — check <span class="mono">keys:</span> in its
+        <span class="mono">tokenbiryani.yaml</span>, or
+        <span class="mono">TOKENBIRYANI_KEY</span> if you started it with
+        <span class="mono">docker compose</span>.</span></div>`
+    : "";
 }
 
 function setAttr(name, store, value) {
@@ -1959,7 +1997,7 @@ segmented("u-group", "group", (value) => { state.groupBy = value; });
   el("lp-base").textContent = location.origin;
   // A gateway with no keys configured is open; try it before asking for one.
   fetch("/admin/status", { headers: stored ? { "x-api-key": stored } : {} })
-    .then((r) => r.ok ? signIn(stored) : signOut(""))
+    .then((r) => r.ok ? signIn(stored, true) : signOut(""))
     .catch(() => signOut(""));
 })();
 </script>

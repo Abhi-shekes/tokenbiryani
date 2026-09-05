@@ -315,6 +315,26 @@ def cmd_serve(args: argparse.Namespace) -> int:
     print(f"  console  http://{host}:{port}/console")
     print(f"  api      ANTHROPIC_BASE_URL=http://{host}:{port}")
 
+    # Which keys this gateway will accept, masked. Enough to tell that the key in
+    # your browser belongs to a different gateway — the failure mode when two dev
+    # stacks with different keys are a `docker compose up` apart — and never enough
+    # to use one, so it is safe in a log.
+    if config.keys:
+        from .core.keys import mask_key
+
+        admins = [k for k in config.keys if k.admin]
+        print("  keys     " + " · ".join(
+            "{}{} {}".format(
+                key.name,
+                paint(" (admin)", "brand", color) if key.admin else "",
+                paint(mask_key(key.key), "dim", color),
+            )
+            for key in config.keys
+        ))
+        if not admins:
+            print(paint("           none of them is an admin key, so /console "
+                        "cannot be used", "disabled", color))
+
     if args.reload:
         # The reloader re-imports the app in a fresh process, so it needs an import
         # string rather than the object we already built. The config path travels in
