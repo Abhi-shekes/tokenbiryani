@@ -25,6 +25,9 @@ htmlcov/
 # --- generated docs ---
 site/
 
+# --- end-to-end run output ---
+e2e-screenshots/
+
 # --- editor and OS noise ---
 .idea/
 .vscode/

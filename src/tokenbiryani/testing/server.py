@@ -88,11 +88,21 @@ def main() -> int:
         help="comma-separated api keys this mock will accept",
     )
     parser.add_argument("--input-limit", type=int, default=100_000)
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        help="model the per-credential prompt cache, so cache-hit rate is a real "
+             "number rather than a flat zero. Off by default because scripted "
+             "behaviours stay exact without it.",
+    )
     args = parser.parse_args()
 
     mock = MockAnthropic()
     for index, api_key in enumerate(args.accounts.split(",")):
-        mock.add(f"acct-{index + 1:02d}", api_key.strip(), input_limit=args.input_limit)
+        mock.add(
+            f"acct-{index + 1:02d}", api_key.strip(),
+            input_limit=args.input_limit, cache_aware=args.cache,
+        )
 
     uvicorn.run(create_mock_app(mock), host=args.host, port=args.port, log_level="warning")
     return 0

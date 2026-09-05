@@ -74,8 +74,14 @@ services:
     build:
       context: .
       target: dev
+    # Same source mount as the gateway, so editing the mock does not need a rebuild.
+    volumes:
+      - ./src:/app/src:ro
     entrypoint: ["python", "-m", "tokenbiryani.testing.server"]
-    command: ["--host", "0.0.0.0", "--port", "9911", "--accounts", "key-01,key-02,key-03"]
+    # --cache models the per-credential prompt cache. Without it the console's
+    # headline metric — cache hit rate — reads a flat 0% on its own demo stack.
+    command: ["--host", "0.0.0.0", "--port", "9911",
+              "--accounts", "key-01,key-02,key-03", "--cache"]
     # Its own check, on its own port. Without this it inherits the image's, which
     # probes 8787 and marks a perfectly healthy mock unhealthy forever.
     healthcheck:
