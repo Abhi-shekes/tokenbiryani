@@ -1,10 +1,11 @@
 # Build status
 
 All eight milestones in [PLAN.md](PLAN.md) are implemented and tested, plus the
-console rework described below and the onboarding work in
-[docs/UX-PLAN.md](docs/UX-PLAN.md).
+console rework described below, the onboarding work in
+[docs/UX-PLAN.md](docs/UX-PLAN.md), and the token-efficiency and quota-pacing work
+in M11 and M12.
 
-`pytest` = 341 passed, 1 skipped (the skip runs against a real Redis when
+`pytest` = 482 passed, 1 skipped (the skip runs against a real Redis when
 `TOKENBIRYANI_REDIS_URL` is set). `ruff` and `mypy` clean. The smoke test
 passes over real sockets, the container image builds and boots, the docs site builds
 with `--strict`, and `benchmarks/cache_affinity.py` reproduces the routing claim.
@@ -22,6 +23,8 @@ with `--strict`, and `benchmarks/cache_affinity.py` reproduces the routing claim
 | M8 | Console — account lifecycle in the UI, usage history, charts | done |
 | M9 | Subscription login — OAuth + PKCE, session refresh | done, unverified |
 | M10 | Onboarding — first run, account configuration, prices | done |
+| M11 | Token efficiency — adaptive output leases, cache diagnosis | done |
+| M12 | Quota pacing — weekly pace, session budgets, pace-aware policy | done, unverified |
 
 ## What is left
 
@@ -64,6 +67,19 @@ streaming and non-streaming, `GET /v1/models` probe answering — and the rollin
 headers the mirror routes on (`anthropic-ratelimit-unified-*`) were read off real
 responses. What is still untested against the real thing is the authorization-code
 exchange itself, which is the part those three settings gate.
+
+**Pacing's subscription path has not been watched over a real week.** The signal it
+reads — `anthropic-ratelimit-unified-7d-*` — has been read off live responses, so the
+input is verified, but nothing has yet observed a full window from one reset to the
+next against real traffic. Run it in `advisory` mode for a week before enabling
+`enforcing`; the report is the thing that tells you whether the thresholds are set
+anywhere near right for your traffic.
+
+**Adaptive output estimation depends on a window that has never been verified.**
+`routing.output_estimate: adaptive` predicts against the `output-tokens` triple, and
+if the upstream spells those headers differently the mirror stays empty, every
+account reads as full and the prediction changes nothing either way. `tokenbiryani
+doctor` settles that too, and it is the same one run that closes the item above.
 
 Smaller, and genuinely optional:
 

@@ -5,6 +5,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- The benchmark's published figures move with adaptive output leases in place:
+  `sticky_headroom` reaches 79.6% cache hit at $0.4774, and cache-blind routing now
+  costs 2.00x rather than 1.94x. Reproduced by `python benchmarks/cache_affinity.py`.
+
 ### Added
 - `pacing.prefer_batch_lane_when_ahead` (default `true`, needs `batch.enabled`) sends
   batch-priority work to the Message Batches API while the pool is ahead of pace,

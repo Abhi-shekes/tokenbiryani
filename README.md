@@ -64,12 +64,12 @@ prompt cache. Prices are illustrative ratios, not a price list.
 
 | Strategy | Cache hit | Cache breaks | Cost | vs sticky | Billed input |
 |---|---|---|---|---|---|
-| sticky_headroom | 78.6% | 0 | $0.4923 | — | 433,152 |
-| round_robin | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
-| least_loaded | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
-| headroom | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
+| sticky_headroom | 79.6% | 0 | $0.4774 | — | 433,152 |
+| round_robin | 47.8% | 144 | $0.9535 | 2.00x | 433,152 |
+| least_loaded | 47.8% | 144 | $0.9535 | 2.00x | 433,152 |
+| headroom | 47.8% | 144 | $0.9535 | 2.00x | 433,152 |
 
-**Cache-blind routing costs 1.94x here.** And note that round-robin, least-loaded and
+**Cache-blind routing costs 2.00x here.** And note that round-robin, least-loaded and
 most-headroom all pay exactly the same penalty: any strategy that ignores affinity
 visits every account once per conversation, so they all take the same number of cache
 misses. The penalty is inherent to cache-blindness, not a quirk of round-robin.

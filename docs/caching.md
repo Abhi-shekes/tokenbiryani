@@ -19,10 +19,10 @@ models the per-credential cache:
 
 | Strategy | Cache hit | Cache breaks | Cost | vs sticky |
 |---|---|---|---|---|
-| `sticky_headroom` | 78.6% | 0 | $0.4923 | — |
-| `round_robin` | 47.8% | 144 | $0.9535 | 1.94x |
-| `least_loaded` | 47.8% | 144 | $0.9535 | 1.94x |
-| `headroom` | 47.8% | 144 | $0.9535 | 1.94x |
+| `sticky_headroom` | 79.6% | 0 | $0.4774 | — |
+| `round_robin` | 47.8% | 144 | $0.9535 | 2.00x |
+| `least_loaded` | 47.8% | 144 | $0.9535 | 2.00x |
+| `headroom` | 47.8% | 144 | $0.9535 | 2.00x |
 
 Reproduce with `python benchmarks/cache_affinity.py`. Prices there are illustrative
 ratios, not a price list.
