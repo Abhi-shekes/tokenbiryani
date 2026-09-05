@@ -73,7 +73,9 @@ def test_missing_cache_rate_renders_as_a_dash():
 
 def test_parser_has_every_command():
     parser = build_parser()
-    for command in ("init", "serve", "status", "keygen", "strategies", "doctor"):
+    for command in (
+        "init", "serve", "console", "status", "keygen", "strategies", "doctor",
+    ):
         assert parser.parse_args([command]).command == command
 
 
@@ -160,7 +162,9 @@ def test_doctor_reports_an_http_error_instead_of_a_traceback(monkeypatch, capsys
 def test_serve_no_longer_refuses_an_empty_pool(tmp_path, monkeypatch, capsys):
     """An empty pool is a first run, not an error — the console is where you fix it.
 
-    It used to exit 1, which left nowhere to add the first account from.
+    It used to exit 1, which left nowhere to add the first account from, and then
+    warn on stderr, which made the expected first run read as a fault. It is now a
+    next step on stdout.
     """
     import tokenbiryani.cli as cli
 
@@ -177,7 +181,10 @@ def test_serve_no_longer_refuses_an_empty_pool(tmp_path, monkeypatch, capsys):
     )
     args = build_parser().parse_args(["-c", str(config), "serve"])
     assert cli.cmd_serve(args) == 0, "an empty pool must not be fatal"
-    assert "add one at" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "no accounts yet" in captured.out
+    assert "tokenbiryani console" in captured.out, "and how to fix it"
+    assert captured.err == "", "an expected first run is not a warning"
     assert served, "the server still started"
 
 
@@ -286,3 +293,87 @@ def test_serve_bounds_its_graceful_shutdown(tmp_path, monkeypatch):
         assert cli.cmd_serve(build_parser().parse_args(["-c", str(config)] + argv)) == 0
         assert served["timeout_graceful_shutdown"] == cli.GRACEFUL_SHUTDOWN_SECONDS, argv
     assert 0 < cli.GRACEFUL_SHUTDOWN_SECONDS <= 30
+
+
+# ---- the first five minutes ---------------------------------------------------
+# The README's own quickstart, run the way a new user runs it.
+
+
+def test_init_then_serve_works_on_a_clean_machine(tmp_path, monkeypatch, capsys):
+    """`init && serve` with nothing exported. This used to exit 1.
+
+    The old template declared an account referencing ${ANTHROPIC_API_KEY}, and
+    interpolation raises on an unset variable — correctly — so the two commands the
+    README opens with failed for anyone who had not already exported a key.
+    """
+    import tokenbiryani.cli as cli
+    from tokenbiryani.config import Config
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = tmp_path / "tokenbiryani.yaml"
+
+    args = build_parser().parse_args(["-c", str(config), "init"])
+    assert cli.cmd_init(args) == 0
+
+    # The step that used to fail: the file must load with an empty environment.
+    loaded = Config.load(str(config))
+    assert loaded.accounts == [], "a starter config declares no account"
+    assert any(k.admin for k in loaded.keys), "and one admin key to reach the console"
+
+    served = {}
+    monkeypatch.setitem(
+        __import__("sys").modules, "uvicorn",
+        type("uvicorn", (), {"run": staticmethod(lambda *a, **k: served.update(k))})(),
+    )
+    assert cli.cmd_serve(build_parser().parse_args(["-c", str(config), "serve"])) == 0
+    assert served, "the gateway starts with an empty pool"
+
+
+def test_init_seeds_an_account_when_given_a_key(tmp_path, monkeypatch):
+    """--api-key is for operators who want the credential in the file."""
+    import tokenbiryani.cli as cli
+    from tokenbiryani.config import Config
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = tmp_path / "tokenbiryani.yaml"
+    args = build_parser().parse_args(
+        ["-c", str(config), "init", "--api-key", "sk-ant-seeded"]
+    )
+    assert cli.cmd_init(args) == 0
+
+    loaded = Config.load(str(config))
+    assert [a.id for a in loaded.accounts] == ["acct-01"]
+    assert loaded.accounts[0].api_key == "sk-ant-seeded"
+
+
+def test_init_writes_a_config_that_can_price_a_model(tmp_path, monkeypatch):
+    """`pricing: builtin` in the template has to resolve, or cost stays a dash."""
+    import tokenbiryani.cli as cli
+    from tokenbiryani.config import Config
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = tmp_path / "tokenbiryani.yaml"
+    assert cli.cmd_init(build_parser().parse_args(["-c", str(config), "init"])) == 0
+
+    loaded = Config.load(str(config))
+    assert loaded.pricing_as_of, "the bundled table is dated, and the date is loaded"
+    assert loaded.price_for("claude-opus-5") is not None
+
+
+def test_console_reports_a_gateway_that_is_not_running(tmp_path, monkeypatch, capsys):
+    """The likeliest failure, and it must not be a traceback."""
+    import httpx
+
+    import tokenbiryani.cli as cli
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = tmp_path / "tokenbiryani.yaml"
+    cli.cmd_init(build_parser().parse_args(["-c", str(config), "init"]))
+
+    def refuse(*args, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "post", refuse)
+    args = build_parser().parse_args(["-c", str(config), "console", "--no-browser"])
+    assert cli.cmd_console(args) == 1
+    assert "is the gateway running" in capsys.readouterr().err

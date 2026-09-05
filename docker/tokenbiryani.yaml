@@ -24,29 +24,13 @@ store:
   path: /state/tokenbiryani.db
   secret_key_path: /state/tokenbiryani.key
 
-accounts:
-  # Points at the bundled mock upstream, so `docker compose up` comes up green with
-  # no credentials and no spend. Delete these three once you have real accounts.
-  - id: mock-01
-    name: Mock upstream 1
-    type: anthropic_api
-    api_key: key-01
-    base_url: http://mock:9911
-  - id: mock-02
-    name: Mock upstream 2
-    type: anthropic_api
-    api_key: key-02
-    base_url: http://mock:9911
-  - id: mock-03
-    name: Mock upstream 3
-    type: anthropic_api
-    api_key: key-03
-    base_url: http://mock:9911
-    cost_tier: 2.5
-
-  # A real account. Uncomment with ANTHROPIC_API_KEY set — or skip this entirely
-  # and add it from the console, which stores it encrypted and lets you name, test
-  # and rotate it in place.
+accounts: []
+  # Empty on purpose. Add your first account from the console at
+  # http://localhost:8787/console — it is stored encrypted in Redis, not written
+  # back here, and can be renamed, tested and rotated in place.
+  #
+  # Or declare one here, with ANTHROPIC_API_KEY set in your .env:
+  #
   # - id: acct-01
   #   name: Production key
   #   type: anthropic_api
@@ -59,15 +43,8 @@ keys:
     # charts and account management. Issue tenant keys without it.
     admin: true
 
-# Costs are reported, and spend caps enforced, only for models named here. The
-# gateway ships no price list, so it can never bill you against stale numbers.
-#
-# These are ILLUSTRATIVE RATIOS for the mock stack, not Anthropic's price list, and
-# they exist so the cost charts show something rather than a column of $0.0000.
-# Replace them from Anthropic's current pricing page before trusting a figure.
-pricing:
-  claude-*:
-    input: 3.0
-    output: 15.0
-    cache_read: 0.30
-    cache_write: 3.75
+# Costs are reported, and spend caps enforced, only for models that have a price.
+# `builtin` is the dated table that ships with this release; the console shows its
+# date beside every cost, so a stale number is visible rather than silent. Check
+# https://anthropic.com/pricing and override any model by naming it here.
+pricing: builtin

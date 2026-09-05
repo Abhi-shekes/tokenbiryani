@@ -60,6 +60,11 @@ reports a partly-used budget — permanently. Unobservable accounts are scored a
 `assumed_headroom` and excluded from the capacity horizon, which would otherwise be
 promising capacity nobody can see.
 
+If it reports a *fraction* spent rather than a count remaining, emit the unified
+headers (`anthropic-ratelimit-unified-{window}-{status,utilization,reset}`) and the
+mirror will route on `1 - utilization` instead of the assumed figure. A measurement
+beats a guess; the horizon and leases still need counts, and still leave it out.
+
 ## A state store
 
 Implement `store.base.StateStore` and add it to `build_store`. The memory, SQLite and
@@ -72,10 +77,12 @@ which made it evict one entry more than the others until the parity suite caught
 
 ## Testing your extension
 
-The package ships a scriptable fake Anthropic API:
+The repository carries a scriptable fake Anthropic API in `tests/support/`. It is test
+scaffolding, not part of the installed package, so it comes from a clone — the suite
+puts `tests/` on the path, and anything outside it sets `PYTHONPATH=tests`:
 
 ```python
-from tokenbiryani.testing.mock_upstream import MockAnthropic, rate_limit, ok
+from support.mock_upstream import MockAnthropic, rate_limit, ok
 
 mock = MockAnthropic()
 mock.add("acct-01", "key-a", cache_aware=True)
@@ -86,5 +93,5 @@ mock.latency = 0.05     # force real concurrency overlap
 It also runs as a real server for end-to-end work:
 
 ```bash
-python -m tokenbiryani.testing.server --port 9911 --accounts key-a,key-b
+PYTHONPATH=tests python -m support.server --port 9911 --accounts key-a,key-b
 ```

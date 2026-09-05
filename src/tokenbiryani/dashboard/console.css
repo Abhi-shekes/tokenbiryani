@@ -37,7 +37,6 @@
   --crit:#A93125;  --crit-t:#8A2318;  --crit-w:#FAE9E6;
   --cache:#7A4FD0; --cache-t:#5C39A4; --cache-w:#F1EBFC;
 }
-:root[data-density="compact"]{ --row:7px; --s5:16px; --s6:22px; }
 
 *,*::before,*::after{box-sizing:border-box}
 html,body{height:100%}
@@ -134,7 +133,7 @@ a{color:var(--accent);text-underline-offset:2px}
 .btn:disabled{opacity:.45;cursor:default;filter:none}
 .btn.sm{padding:4px 9px;font-size:11.5px}
 
-label.f{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:600;
+label.f,.f{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:600;
   letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);min-width:0}
 label.f input,label.f select,label.f textarea{background:var(--surface-2);
   border:1px solid var(--border);border-radius:var(--r-sm);padding:9px 11px;color:var(--text);
@@ -142,7 +141,7 @@ label.f input,label.f select,label.f textarea{background:var(--surface-2);
   transition:border-color .14s var(--ease),background .14s var(--ease)}
 label.f input:focus,label.f select:focus{border-color:var(--accent);outline:none;
   background:var(--surface)}
-label.f .hint{font-size:10.5px;font-weight:400;letter-spacing:normal;text-transform:none;
+label.f .hint,.f .hint{font-size:10.5px;font-weight:400;letter-spacing:normal;text-transform:none;
   color:var(--text-3)}
 
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:650;
@@ -253,17 +252,90 @@ tr.won td{background:var(--ready-w)} tr.won td:first-child{color:var(--ready-t)}
   @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
 }
 
-/* ---------- onboarding ---------- */
-.onboard{min-height:100vh;display:grid;place-items:center;padding:var(--s5)}
-.onboard .box{width:min(560px,100%);display:flex;flex-direction:column;gap:var(--s4)}
-.onboard .brand{justify-content:center;margin-bottom:var(--s2)}
-.onboard h2{font-size:21px;text-align:center}
-.onboard .lede{color:var(--text-3);font-size:13px;text-align:center;line-height:1.65}
-.steps{display:flex;gap:6px}
-.steps i{flex:1;height:3px;border-radius:99px;background:var(--surface-3);
-  transition:background .3s var(--ease)}
-.steps i.on{background:var(--accent)}
-.steps i.done{background:var(--ready)}
+/* ---------- onboarding ----------
+   A full page, not a dialog. The rail states the whole shape of the setup up
+   front — four steps, where you are, what is left — because the thing being
+   asked for is a credential, and a wizard that reveals its length one screen at
+   a time earns none of the trust that asking for one requires. */
+.onboard{min-height:100vh;display:grid;grid-template-columns:296px minmax(0,1fr)}
+
+.wiz-rail{background:var(--surface);border-right:1px solid var(--border);
+  padding:var(--s5) var(--s4);display:flex;flex-direction:column;gap:var(--s5)}
+.wiz-rail .brand{padding:0}
+
+.wiz-steps{display:flex;flex-direction:column;gap:2px;flex:1}
+.wiz-step{display:flex;gap:var(--s3);align-items:flex-start;padding:10px var(--s2);
+  border-radius:var(--r-sm);text-align:left;width:100%}
+.wiz-step .n{width:22px;height:22px;flex:none;border-radius:50%;display:grid;
+  place-items:center;font-size:11px;font-weight:650;font-family:var(--mono);
+  background:var(--surface-3);color:var(--text-3);border:1px solid transparent;
+  transition:background .2s var(--ease),color .2s var(--ease)}
+.wiz-step .t{min-width:0}
+.wiz-step .t b{display:block;font-size:12.5px;font-weight:550;color:var(--text-3)}
+.wiz-step .t span{display:block;font-size:11px;color:var(--text-3);line-height:1.5;
+  margin-top:2px}
+.wiz-step.on{background:var(--surface-2)}
+.wiz-step.on .n{background:var(--accent);color:var(--accent-ink)}
+.wiz-step.on .t b{color:var(--text)}
+.wiz-step.done .n{background:var(--ready-w);color:var(--ready-t);
+  border-color:var(--ready)}
+.wiz-step.done .t b{color:var(--text-2)}
+
+.wiz-foot{display:flex;flex-direction:column;gap:var(--s2);
+  border-top:1px solid var(--border);padding-top:var(--s4)}
+.wiz-foot .row{display:flex;gap:6px}
+.wiz-foot .chip{flex:1;white-space:nowrap}
+.wiz-foot .addr{font-size:10.5px;color:var(--text-3);font-family:var(--mono);
+  word-break:break-all}
+
+.wiz-body .card>footer{display:flex;gap:var(--s2);justify-content:flex-end;
+  padding:0 var(--s4) var(--s4);flex-wrap:wrap}
+.wiz-main{padding:var(--s6);overflow-y:auto;min-width:0}
+/* The pane is the content. An inner cap left a wizard's worth of empty gutter on
+   any real monitor; the prose keeps its own measure below, which is the only part
+   that actually wants to be narrow. */
+.wiz-body{width:100%;max-width:1320px;display:flex;flex-direction:column;gap:var(--s4)}
+.onboard h2{font-size:22px}
+.onboard .lede{color:var(--text-3);font-size:13px;line-height:1.65;max-width:70ch}
+
+/* Step 1: the routes in, one card each. A radio dressed as a card — the label
+   is the hit target, so the whole card is clickable without any script. */
+.routes{display:flex;flex-direction:column;gap:var(--s2)}
+.route{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s4);
+  border:1px solid var(--border);border-radius:var(--r);background:var(--surface);
+  cursor:pointer;transition:border-color .14s var(--ease),background .14s var(--ease)}
+.route:hover{border-color:var(--border-strong);background:var(--surface-2)}
+.route:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.route:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.route input{margin-top:2px;accent-color:var(--accent);flex:none;width:auto}
+.route .rb{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.route .rt{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+  font-size:13.5px;font-weight:600;color:var(--text)}
+.route .rs{font-size:11.5px;color:var(--text-3);line-height:1.6}
+
+/* Step 3's verdict, one line per thing checked. */
+.checks{display:flex;flex-direction:column;gap:var(--s2)}
+.check{display:flex;gap:var(--s2);align-items:flex-start;font-size:12.5px;
+  color:var(--text-2)}
+.check i{width:16px;height:16px;flex:none;border-radius:50%;margin-top:1px;
+  display:grid;place-items:center;font-size:10px;font-style:normal;font-weight:700}
+.check.ok i{background:var(--ready-w);color:var(--ready-t)}
+.check.no i{background:var(--crit-w);color:var(--crit-t)}
+.check.na i{background:var(--surface-3);color:var(--text-3)}
+
+@media(max-width:900px){
+  .onboard{grid-template-columns:1fr}
+  .wiz-rail{flex-direction:row;align-items:center;gap:var(--s4);flex-wrap:wrap;
+    border-right:0;border-bottom:1px solid var(--border);padding:var(--s4)}
+  .wiz-steps{flex-direction:row;gap:var(--s2);flex:1 1 100%;overflow-x:auto}
+  .wiz-step{padding:8px;flex:none;width:auto}
+  .wiz-step .t{display:none}
+  .wiz-step.on .t{display:block}
+  .wiz-step.on .t span{display:none}
+  .wiz-foot{border-top:0;padding-top:0;flex-direction:row;align-items:center;
+    flex:1 1 100%}
+  .wiz-main{padding:var(--s5) var(--s4)}
+}
 
 pre.code{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);
   padding:13px 15px;font-family:var(--mono);font-size:11.5px;color:var(--text-2);
@@ -320,13 +392,30 @@ pre.code .c{color:var(--text-3)}
 /* ---------- form details ----------
    label.f stacks, so anything inline becomes its own row. The caption line needs
    to be one element or the "optional" tag lands under the label. */
-label.f .t{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+label.f .t,.f .t{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
 label.f .t em{font-style:normal;text-transform:none;letter-spacing:normal;
   font-weight:400;color:var(--text-3);font-size:10.5px}
 .tog:disabled{opacity:.38;cursor:default}
+/* A disabled control dispatches no pointer events, so its tooltip has to hang
+   on a wrapper with a box of its own. */
+.held{display:inline-block;cursor:help}
 
 /* A modal is narrower than a view, so its grids need their own breakpoints or
    every field stacks and the dialog turns into a scroll. */
+/* ---------- Advanced disclosure ----------
+   The add-account form is essentials above, admin fields folded away below. The
+   summary has to look like a control rather than a heading, or nobody opens it. */
+.adv{border-top:1px solid var(--border);padding-top:var(--s3)}
+.adv>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;
+  font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--text-3);user-select:none}
+.adv>summary::-webkit-details-marker{display:none}
+.adv>summary::before{content:"+";font-family:var(--mono);font-size:13px;color:var(--accent)}
+.adv[open]>summary::before{content:"\2212"}
+.adv>summary:hover{color:var(--text)}
+.adv>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+.adv[open]>summary{margin-bottom:var(--s3)}
+
 .modal{width:min(580px,100%)}
 .modal .grid.g2{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
 .modal .grid.g3{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
@@ -477,3 +566,29 @@ label.f .t em{font-style:normal;text-transform:none;letter-spacing:normal;
 .lp-endpoint-label{display:block;font-size:10.5px;font-weight:650;letter-spacing:.09em;
   text-transform:uppercase;color:var(--text-3);margin-bottom:var(--s2)}
 .lp-endpoint .code{background:var(--surface);font-size:11.5px;line-height:1.9}
+
+/* ---- token source picker ---------------------------------------------------
+   Three ways a subscription account gets its token. A segmented control rather
+   than a dropdown because the choice carries a trade-off per option, and a
+   trade-off you have to open a menu to read is one nobody reads. */
+.seg{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--s2)}
+.segb{text-align:left;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:var(--surface-2);color:var(--text-2);padding:9px 11px;cursor:pointer;
+  font:inherit;font-size:12px;font-weight:600;transition:border-color .12s var(--ease)}
+.segb:hover{border-color:var(--border-strong);color:var(--text)}
+.segb.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.segt{display:block;font-weight:400;font-size:10.5px;color:var(--text-3);margin-top:3px}
+.segb.on .segt{color:var(--accent)}
+
+/* One found credentials file. The path is the point — picking the wrong profile
+   is the failure this whole panel exists to prevent — so it leads, in mono. */
+.pick{display:flex;gap:var(--s2);align-items:flex-start;padding:9px 11px;cursor:pointer;
+  border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2)}
+.pick:hover{border-color:var(--border-strong)}
+/* Never full width: these sit inside form blocks whose inputs stretch, and a
+   checkbox stretched to the row pushes its own label off the end. */
+.pick input{margin-top:3px;accent-color:var(--accent);width:auto;flex:none}
+.pickb{display:flex;flex-direction:column;gap:3px;min-width:0}
+.pickt{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:var(--mono);
+  font-size:11.5px;color:var(--text);word-break:break-all}
+.picks{font-size:11px;color:var(--text-3);line-height:1.5}

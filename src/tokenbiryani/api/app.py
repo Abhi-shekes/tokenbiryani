@@ -10,7 +10,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
-    PlainTextResponse,
     RedirectResponse,
     Response,
     StreamingResponse,
@@ -18,7 +17,9 @@ from fastapi.responses import (
 
 from ..config import Config, KeyConfig
 from ..core.gateway import Gateway, GatewayError
+from ..core.handoff import HandoffError, TicketBook, is_loopback
 from ..dashboard import console_css, console_html
+from ..providers.oauth_credentials import detect_credentials
 
 ANTHROPIC_PREFIX = "/v1"
 
@@ -54,6 +55,7 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
     app = FastAPI(title="tokenbiryani", version="0.1.0", docs_url=None, redoc_url=None)
     app.state.gateway = gateway or Gateway(config)
     app.state.config = config
+    app.state.tickets = TicketBook()
 
     @app.on_event("startup")
     async def _startup() -> None:
@@ -188,12 +190,6 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
             },
         )
 
-    @app.get("/metrics")
-    async def metrics() -> PlainTextResponse:
-        return PlainTextResponse(
-            app.state.gateway.metrics.render(), media_type="text/plain; version=0.0.4"
-        )
-
     @app.get("/admin/status")
     async def status(request: Request) -> JSONResponse:
         authenticate_admin(request)
@@ -276,10 +272,62 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
             return _error(404, f"no managed account named {account_id!r}", "not_found_error")
         return JSONResponse({"deleted": account_id})
 
+    @app.delete("/admin/accounts/{account_id}/override")
+    async def clear_account_override(request: Request, account_id: str) -> JSONResponse:
+        """Drop console edits to a config account, restoring what the file says."""
+        authenticate_admin(request)
+        gateway: Gateway = app.state.gateway
+        if not gateway.is_config_account(account_id):
+            return _error(
+                404,
+                f"{account_id!r} is not declared in the config file, so it has no "
+                "override to clear",
+                "not_found_error",
+            )
+        cleared = await gateway.clear_override(account_id)
+        return JSONResponse({"cleared": cleared, "account": gateway.account_detail(account_id)})
+
+    @app.post("/admin/accounts/test")
+    async def test_credential(request: Request) -> JSONResponse:
+        """Probe a credential that has not been stored.
+
+        The console calls this before POSTing the account, so a typo'd key is a
+        message in a dialog rather than a disabled row to clean up afterwards.
+        """
+        authenticate_admin(request)
+        payload = await read_body(request)
+        result = await app.state.gateway.probe_credential(
+            str(payload.get("api_key") or ""),
+            type=payload.get("type"),
+            base_url=payload.get("base_url"),
+            options=payload.get("options"),
+        )
+        result.pop("headers", None)
+        result.pop("classification", None)
+        return JSONResponse(result)
+
     @app.post("/admin/accounts/{account_id}/test")
     async def test_account(request: Request, account_id: str) -> JSONResponse:
         authenticate_admin(request)
         return JSONResponse(await app.state.gateway.test_account(account_id))
+
+    @app.post("/admin/accounts/{account_id}/diagnose")
+    async def diagnose_account(request: Request, account_id: str) -> JSONResponse:
+        """What `tokenbiryani doctor` reports, for one account, without the spend.
+
+        The check it performs is the one open risk in the project: if the upstream
+        spells a rate-limit header differently, routing degrades to round-robin and
+        nothing looks wrong. Putting it behind the console's verify step is what
+        makes it run for people who never learn the command exists.
+        """
+        authenticate_admin(request)
+        payload = await read_body(request)
+        # `spend: true` is the caller accepting one `max_tokens=1` completion, which
+        # is the only way to see the limit headers on an account that has served no
+        # traffic yet. Never the default: nothing here spends money unasked.
+        return JSONResponse(await app.state.gateway.diagnose_account(
+            account_id, spend=bool(payload.get("spend"))
+        ))
 
     # ---- subscription login --------------------------------------------------
 
@@ -301,6 +349,18 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
                 ) if not value
             ],
         })
+
+    @app.get("/admin/oauth/detect")
+    async def oauth_detect(request: Request) -> JSONResponse:
+        """Claude Code logins on this machine, so the console can offer one.
+
+        Never returns a token — only which file, which subscription, and whether it
+        is current. Picking the wrong file is the failure this exists to prevent:
+        with CLAUDE_CONFIG_DIR set, ~/.claude holds a different account entirely and
+        the resulting 401 says nothing about which of the two was read.
+        """
+        authenticate_admin(request)
+        return JSONResponse({"candidates": detect_credentials()})
 
     @app.post("/admin/oauth/start")
     async def oauth_start(request: Request) -> JSONResponse:
@@ -342,6 +402,46 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
             + "</body>"
         )
 
+    # ---- console sign-in handoff ---------------------------------------------
+
+    @app.post("/admin/console-ticket")
+    async def console_ticket(request: Request) -> JSONResponse:
+        """Mint a single-use ticket for the key that just authenticated.
+
+        `tokenbiryani console` calls this with the admin key it read from the config,
+        then opens the browser on the ticket. The key never travels in the URL; the
+        ticket does, and it is spent the moment the page loads.
+        """
+        key = authenticate_admin(request)
+        if not is_loopback(config.server.host):
+            return _error(
+                403,
+                f"this gateway is bound to {config.server.host}, not loopback. A sign-in "
+                "link is a bearer token in a URL, so it is minted only for a gateway "
+                "nothing off-box can reach — sign in with the key instead.",
+                "permission_error",
+            )
+        presented = _credential(request) or key.key
+        try:
+            ticket, ttl = app.state.tickets.mint(presented)
+        except HandoffError as exc:
+            return _error(409, str(exc), "invalid_request_error")
+        return JSONResponse({"ticket": ticket, "expires_in": ttl})
+
+    @app.post("/admin/console-session")
+    async def console_session(request: Request) -> JSONResponse:
+        """Redeem a ticket for the key it stands for.
+
+        Deliberately keyless: the browser arriving here has nothing else to present,
+        and the ticket is the credential. One redemption, then it is gone.
+        """
+        payload = await read_body(request)
+        try:
+            key = app.state.tickets.redeem(str(payload.get("ticket") or ""))
+        except HandoffError as exc:
+            return _error(401, str(exc), "authentication_error")
+        return JSONResponse({"key": key})
+
     @app.post("/admin/reload")
     async def reload(request: Request) -> JSONResponse:
         authenticate_admin(request)
@@ -370,6 +470,17 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         # The only time the plaintext exists outside the caller's hands.
         return JSONResponse({"key": plaintext, "record": record}, status_code=201)
 
+    @app.patch("/admin/keys/{name}")
+    async def update_key(request: Request, name: str) -> JSONResponse:
+        """Edit a managed key's scope without reissuing it.
+
+        Reissuing breaks every client already holding the key, which is why a key
+        scoped at a since-deleted account usually just sits there blocking reload.
+        """
+        authenticate_admin(request)
+        payload = await read_body(request)
+        return JSONResponse(await app.state.gateway.update_key(name, **payload))
+
     @app.delete("/admin/keys/{name}")
     async def revoke_key(request: Request, name: str) -> JSONResponse:
         authenticate_admin(request)
@@ -377,6 +488,24 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         if not removed:
             return _error(404, f"no managed key named {name!r}", "not_found_error")
         return JSONResponse({"revoked": name})
+
+    @app.get("/admin/settings")
+    async def settings(request: Request) -> JSONResponse:
+        authenticate_admin(request)
+        return JSONResponse(app.state.gateway.settings_view())
+
+    @app.post("/admin/settings")
+    async def update_settings(request: Request) -> JSONResponse:
+        """Change a gateway-wide setting from the console.
+
+        Stored in the gateway, not written back to tokenbiryani.yaml: the file is
+        the operator's, and a process that rewrites its operator's config file is
+        one that eventually loses a comment somebody needed. The setting is applied
+        again after every reload, so an unrelated edit to the file cannot revert it.
+        """
+        authenticate_admin(request)
+        payload = await read_body(request)
+        return JSONResponse(await app.state.gateway.update_settings(payload))
 
     @app.get("/admin/requests")
     async def requests(request: Request, limit: int = 50) -> JSONResponse:

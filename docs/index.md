@@ -17,6 +17,9 @@ export ANTHROPIC_AUTH_TOKEN=bir_...
 claude
 ```
 
+![The console's Accounts screen: the pool, where each account was declared, and what
+it is allowed to spend](images/console-accounts.png)
+
 ## Start here
 
 - **[Quickstart](quickstart.md)** — running in about a minute.

@@ -3,21 +3,19 @@
 ## The whole stack, from one file
 
 ```bash
-docker compose up -d      # gateway + Redis + a mock Anthropic
+docker compose up -d      # gateway + Redis
 docker compose down       # stop it
 docker compose down -v    # stop it and forget the stored accounts too
 ```
 
-Nothing needs setting first. The stack boots against the mock upstream bundled with
-the package, so it comes up healthy, costs nothing and reaches nothing — then you open
-`http://localhost:8787/console` and add real accounts there.
+Nothing needs setting first. The stack comes up with an empty pool and the onboarding
+wizard at `http://localhost:8787/console`, which is where the first credential goes.
 
-Three services, all in `docker-compose.yml`:
+Two services, both in `docker-compose.yml`:
 
 | | |
 |---|---|
 | `gateway` | the gateway, built from the Dockerfile's `dev` target |
-| `mock` | the bundled fake Anthropic, so the pool has something to serve |
 | `redis` | shared state: affinity, the spend ledger, usage history, stored accounts |
 
 ### Editing it while it runs
@@ -113,14 +111,26 @@ the process dies, which silently resets every cap.
   back it up somewhere other than the store it protects.
 - Replace the development keys in `docker-compose.yml`. They are in the repository.
 
-## Metrics
+## Watching it
 
-Scrape `/metrics`. The series worth alerting on:
+There is no Prometheus endpoint. Two authenticated surfaces carry the same facts, and
+unlike `/metrics` neither is readable by anything that can merely reach the port:
 
 | | |
 |---|---|
-| `tokenbiryani_account_headroom` | per account, 0 means no budget left |
-| `tokenbiryani_queue_depth` | sustained non-zero means the pool is undersized |
-| `tokenbiryani_cache_breaks_total` | rising means money leaking — see [caching](caching.md) |
-| `tokenbiryani_upstream_failures_total` | by class; `invalid_auth` needs a human |
-| `tokenbiryani_failovers_total` | routine in small numbers |
+| `GET /admin/status` | the live pool — per-account state, headroom, queue depth, cache hit rate |
+| `GET /admin/usage` | bucketed history, persisted for 90 days on `sqlite` and `redis` |
+| `GET /admin/requests/{id}` | one request's whole routing decision |
+
+What to watch, and why:
+
+| | |
+|---|---|
+| per-account headroom in `/admin/status` | 0 means no budget left |
+| `queue.depth` | sustained non-zero means the pool is undersized |
+| `cache_breaks` in `/admin/usage` | rising means money leaking — see [caching](caching.md) |
+| an account reading `disabled` | needs a human; `invalid_auth` means someone rotated a key |
+| `failovers` in `/admin/usage` | routine in small numbers |
+
+`tokenbiryani status` prints the first of these in the terminal, and takes `--json` if
+you want to feed it to something else.

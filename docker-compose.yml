@@ -1,13 +1,13 @@
 # The whole stack, up and down, from this one file.
 #
-#   docker compose up -d        gateway + Redis + a mock Anthropic
+#   docker compose up -d        gateway + Redis
 #   docker compose logs -f      follow it
 #   docker compose down         stop it
 #   docker compose down -v      stop it and forget the stored accounts too
 #
-# Then open http://localhost:8787/console and add your accounts there. Nothing
-# needs to be set first: the stack boots against the bundled mock upstream, so it
-# comes up green and costs nothing.
+# Then open http://localhost:8787/console and add your accounts there. The stack
+# comes up with an empty pool and the onboarding wizard, which is where the first
+# credential goes — nothing needs to be set first.
 #
 # Editing anything under ./src restarts the gateway in place — the source is
 # bind-mounted and uvicorn watches it. The console's HTML and CSS are read per
@@ -58,38 +58,9 @@ services:
       TOKENBIRYANI_SECRET_KEY: ${TOKENBIRYANI_SECRET_KEY:-}
       # Optional. Leave it unset and add accounts from the console instead.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      MOCK_UPSTREAM_URL: http://mock:9911
     depends_on:
       redis:
         condition: service_healthy
-      mock:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # A stand-in Anthropic, bundled with the package. It models the per-credential
-  # prompt cache and the rate-limit headers, so the console has something real to
-  # draw and nothing here reaches the internet or costs money.
-  mock:
-    image: tokenbiryani:dev
-    build:
-      context: .
-      target: dev
-    # Same source mount as the gateway, so editing the mock does not need a rebuild.
-    volumes:
-      - ./src:/app/src:ro
-    entrypoint: ["python", "-m", "tokenbiryani.testing.server"]
-    # --cache models the per-credential prompt cache. Without it the console's
-    # headline metric — cache hit rate — reads a flat 0% on its own demo stack.
-    command: ["--host", "0.0.0.0", "--port", "9911",
-              "--accounts", "key-01,key-02,key-03", "--cache"]
-    # Its own check, on its own port. Without this it inherits the image's, which
-    # probes 8787 and marks a perfectly healthy mock unhealthy forever.
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9911/v1/models', timeout=2).status == 200 else 1)"]
-      interval: 5s
-      timeout: 3s
-      start_period: 5s
-      retries: 10
     restart: unless-stopped
 
   redis:

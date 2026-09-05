@@ -16,14 +16,13 @@ import random
 import re
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, AsyncIterator, Dict, List, Mapping, Optional, Tuple
 
 import httpx
 
 from ..config import AccountConfig, Config, ConfigError, KeyConfig
 from ..observability.events import Attempt, EventLog, RequestEvent
-from ..observability.metrics import Metrics
 from ..observability.usage import (
     aggregate,
     resolve_bucket,
@@ -44,6 +43,7 @@ from ..store.base import SCOPE_ACCOUNT, SCOPE_KEY, StateStore, build_store
 from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
+from .diagnostics import inspect_headers, looks_unified
 from .keys import KeyRegistry, generate_key, record_from_config
 from .limits import LimitMirror, TokenEstimate, estimate_request
 from .oauth import OAuthClient, OAuthError, OAuthTokens, PendingLogin, make_verifier
@@ -57,7 +57,7 @@ from .queue import (
     parse_priority,
     priority_name,
 )
-from .router import Decision, Router, RoutingContext
+from .router import Decision, Router, RoutingContext, available_strategies
 from .secrets import SecretBox, SecretError
 from .session import session_key as compute_session_key
 
@@ -131,7 +131,6 @@ class Gateway:
         self.store = store or build_store(config)
         self.keys = KeyRegistry(config.keys)
         self.events = EventLog(config.observability.event_buffer)
-        self.metrics = Metrics()
         self.gate = CapacityGate(config.queue.max_size, config.queue.default_max_wait_seconds)
         self.router = Router(config.routing.strategy, config.routing.weights)
 
@@ -160,10 +159,18 @@ class Gateway:
         #: Kept beside the token so a snapshot needs no store round-trip.
         self._oauth_meta: Dict[str, Dict[str, Any]] = {}
         self._logins: Dict[str, PendingLogin] = {}
+        #: Console edits to accounts the config file declares. The file keeps the
+        #: credential and the identity; these are the operational fields an operator
+        #: needs to change at 3am without opening an editor on the server.
+        self._account_overrides: Dict[str, Dict[str, Any]] = {}
+        #: Console edits to gateway-wide settings, applied over the file's values.
+        self._settings: Dict[str, Any] = {}
+        #: What the file asked for, kept because a console override replaces the
+        #: live value and the Settings screen shows both.
+        self._file_pricing_table = config.pricing_table
 
         self._client = client
         self._owns_client = client is None
-        self._register_metrics()
 
     # ---- lifecycle -----------------------------------------------------------
 
@@ -173,6 +180,7 @@ class Gateway:
                 timeout=httpx.Timeout(self.config.server.request_timeout_seconds, connect=10.0)
             )
         await self.store.startup()
+        await self.refresh_settings()
         await self.refresh_accounts()
         await self.hydrate_spend()
         await self.refresh_keys()
@@ -227,6 +235,145 @@ class Gateway:
     def is_config_account(self, account_id: str) -> bool:
         return account_id in self._config_account_ids
 
+    # ---- overrides on config accounts ----------------------------------------
+
+    #: What the console may change on an account the file declares. Credentials,
+    #: type and base_url are absent on purpose: those are the file's business, and
+    #: an override that could repoint an account at another host would make the
+    #: config file a lie rather than an authority.
+    OVERRIDABLE = (
+        "name", "enabled", "cost_tier", "priority", "spend_cap_usd",
+        "models", "max_concurrency",
+    )
+
+    @staticmethod
+    def is_override(record: Mapping[str, Any]) -> bool:
+        return str(record.get("kind") or "") == "override"
+
+    def file_config(self, account_id: str) -> Optional[AccountConfig]:
+        """The account exactly as the config file declares it."""
+        return next((a for a in self.config.accounts if a.id == account_id), None)
+
+    def _apply_override(self, account_id: str) -> None:
+        """Point the runtime at the file's account, or at a copy carrying the override.
+
+        A copy, never an edit in place: `AccountRuntime.config` starts out as the
+        very object the file was parsed into, and mutating it would destroy the
+        value an override has to be revertible to. With a copy, reverting is just
+        pointing back at the original.
+        """
+        runtime = self.accounts.get(account_id)
+        base = self.file_config(account_id)
+        if runtime is None or base is None:
+            return
+        fields = {
+            name: value
+            for name, value in (self._account_overrides.get(account_id) or {}).items()
+            if name in self.OVERRIDABLE and value is not None
+        }
+        runtime.config = replace(base, **fields) if fields else base
+        runtime.mirror.observable = runtime.config.observable_limits
+
+    def _apply_all_overrides(self) -> None:
+        for account_id in self._config_account_ids:
+            self._apply_override(account_id)
+
+    def override_record(self, account_id: str, fields: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": account_id,
+            "kind": "override",
+            "fields": {k: v for k, v in fields.items() if k in self.OVERRIDABLE},
+            "updated_at": time.time(),
+        }
+
+    # ---- gateway-wide settings -----------------------------------------------
+
+    #: Settings the console may change without an editor, and what each is checked
+    #: against. Everything else stays a config-file decision.
+    SETTABLE = ("strategy", "pricing_source")
+
+    async def refresh_settings(self) -> None:
+        """Load console-set settings from the store and apply them over the file."""
+        try:
+            stored = await self.store.get_settings()
+        except Exception as exc:  # noqa: BLE001 - a store blip must not stop startup
+            logger.warning("could not read settings: %s", exc)
+            return
+        self._settings = {k: v for k, v in (stored or {}).items() if k in self.SETTABLE}
+        self.apply_settings()
+
+    def apply_settings(self) -> None:
+        """Re-apply stored settings. Called after anything that rebuilds from config.
+
+        A reload reads the file, so without this a console-set strategy would
+        silently revert the next time anyone touched tokenbiryani.yaml.
+        """
+        strategy = self._settings.get("strategy")
+        if strategy and strategy != self.router.strategy:
+            # A whole Router, not just its name: the scorer and the weight spec are
+            # chosen by the strategy, so renaming the field in place would leave the
+            # gateway claiming round_robin while still scoring like sticky_headroom.
+            self.router = Router(str(strategy), self.config.routing.weights)
+        source = self._settings.get("pricing_source")
+        if source:
+            self.config.use_pricing(str(source))
+
+    async def update_settings(self, changes: Mapping[str, Any]) -> Dict[str, Any]:
+        """Change a setting from the console. Persisted, so a restart keeps it."""
+        unknown = [k for k in changes if k not in self.SETTABLE]
+        if unknown:
+            raise GatewayError(
+                400,
+                "unknown setting(s): {}. Settable: {}".format(
+                    ", ".join(sorted(unknown)), ", ".join(self.SETTABLE)
+                ),
+                kind="invalid_request_error",
+            )
+        if "strategy" in changes:
+            strategy = str(changes["strategy"] or "")
+            if strategy not in available_strategies():
+                raise GatewayError(
+                    400,
+                    "unknown strategy {!r}. Available: {}".format(
+                        strategy, ", ".join(sorted(available_strategies()))
+                    ),
+                    kind="invalid_request_error",
+                )
+        if "pricing_source" in changes:
+            source = str(changes["pricing_source"] or "")
+            if source not in ("builtin", "config"):
+                raise GatewayError(
+                    400,
+                    "pricing_source must be 'builtin' (the dated table shipped with "
+                    "this release) or 'config' (only what tokenbiryani.yaml names)",
+                    kind="invalid_request_error",
+                )
+        for name, value in changes.items():
+            self._settings[name] = value
+            await self.store.put_setting(name, value)
+        self.apply_settings()
+        return self.settings_view()
+
+    def settings_view(self) -> Dict[str, Any]:
+        """What the Settings screen edits, and where each value came from."""
+        return {
+            "strategy": {
+                "value": self.router.strategy,
+                "source": "console" if "strategy" in self._settings else "config",
+                "file_value": self.config.routing.strategy,
+                "options": sorted(available_strategies()),
+            },
+            "pricing_source": {
+                "value": self.config.pricing_table,
+                "source": "console" if "pricing_source" in self._settings else "config",
+                "file_value": self._file_pricing_table,
+                "options": ["builtin", "config"],
+            },
+            "priced_models": sorted(self.config.pricing),
+            "priced_as_of": self.config.pricing_as_of,
+            "priced_source": self.config.pricing_source,
+        }
+
     def _make_upstream(self, account_config: AccountConfig) -> Upstream:
         """One construction point, so an oauth account always gets its token source."""
         if account_config.type == "oauth":
@@ -278,9 +425,17 @@ class Gateway:
         """
         records = await self.store.list_accounts()
         seen = set()
+        overrides: Dict[str, Dict[str, Any]] = {}
         for record in records:
             account_id = str(record.get("id") or "")
-            if not account_id or account_id in self._config_account_ids:
+            if not account_id:
+                continue
+            if self.is_override(record):
+                # An override belongs to a config account and is not one itself.
+                fields = record.get("fields")
+                overrides[account_id] = dict(fields) if isinstance(fields, dict) else {}
+                continue
+            if account_id in self._config_account_ids:
                 continue
             seen.add(account_id)
             try:
@@ -320,6 +475,11 @@ class Gateway:
                 self.accounts.pop(account_id, None)
                 self.upstreams.pop(account_id, None)
 
+        # An override that has been dropped must put the file's own value back, so
+        # reverting is a delete rather than a second edit guessing what the file said.
+        self._account_overrides = overrides
+        self._apply_all_overrides()
+
     def account_record(
         self, account_id: str, name: str, api_key: str, **options: Any
     ) -> Dict[str, Any]:
@@ -335,7 +495,14 @@ class Gateway:
             "max_concurrency": int(options.get("max_concurrency") or 16),
             "spend_cap_usd": options.get("spend_cap_usd"),
             "enabled": bool(options.get("enabled", True)),
-            "observable_limits": bool(options.get("observable_limits", True)),
+            # Forced, not defaulted, for a subscription: an account whose classic
+            # windows never populate would read as permanently full and win every
+            # comparison. Its real budget arrives as unified utilisation instead.
+            "observable_limits": (
+                False
+                if str(options.get("type") or "anthropic_api") == "oauth"
+                else bool(options.get("observable_limits", True))
+            ),
             "options": dict(options.get("options") or {}),
             "created_at": time.time(),
         }
@@ -368,11 +535,7 @@ class Gateway:
 
     async def update_account(self, account_id: str, **changes: Any) -> Dict[str, Any]:
         if self.is_config_account(account_id):
-            raise GatewayError(
-                409,
-                f"{account_id!r} is declared in the config file; edit it there",
-                kind="invalid_request_error",
-            )
+            return await self.override_account(account_id, **changes)
         records = {str(r.get("id")): r for r in await self.store.list_accounts()}
         record = records.get(account_id)
         if record is None:
@@ -401,6 +564,52 @@ class Gateway:
 
         return self.redacted_account(record)
 
+    async def override_account(self, account_id: str, **changes: Any) -> Dict[str, Any]:
+        """Change an operational field on an account the config file declares.
+
+        The file keeps the credential, the type and the base URL — an override that
+        could repoint an account at another host would make the file a lie. What is
+        left is exactly what an operator needs at 3am: turn it off, rename it,
+        re-tier it, cap it. The change is stored in the gateway, not written back to
+        the file, and the console says so; deleting the override puts the file's own
+        values back.
+        """
+        blank: Tuple[Any, ...] = (None, "", {}, ())
+        rejected = [
+            name for name in changes
+            if name not in self.OVERRIDABLE and changes[name] not in blank
+        ]
+        if rejected:
+            raise GatewayError(
+                409,
+                "{!r} is declared in tokenbiryani.yaml. The console can change {} on "
+                "it; {} must be edited in the file.".format(
+                    account_id,
+                    ", ".join(self.OVERRIDABLE),
+                    ", ".join(sorted(rejected)),
+                ),
+                kind="invalid_request_error",
+            )
+        existing = dict(self._account_overrides.get(account_id) or {})
+        existing.update({
+            name: value for name, value in changes.items()
+            if name in self.OVERRIDABLE and value is not None
+        })
+        await self.store.put_account(self.override_record(account_id, existing))
+        await self.refresh_accounts()
+
+        runtime = self.accounts.get(account_id)
+        if runtime is not None and changes.get("enabled") is True:
+            runtime.disabled_reason = None
+            runtime.breaker.record_success()
+        return self.account_detail(account_id) or {"id": account_id}
+
+    async def clear_override(self, account_id: str) -> bool:
+        """Drop a config account's override, restoring what the file says."""
+        removed = await self.store.delete_account(account_id)
+        await self.refresh_accounts()
+        return removed
+
     async def delete_account(self, account_id: str) -> bool:
         if self.is_config_account(account_id):
             raise GatewayError(
@@ -417,7 +626,41 @@ class Gateway:
         account = self.accounts.get(account_id)
         if account is None:
             raise GatewayError(404, f"no account {account_id!r}", kind="not_found_error")
-        upstream = self.upstreams[account_id]
+        result = await self._probe(self.upstreams[account_id])
+        headers = result.get("headers") or {}
+        if headers:
+            account.mirror.update_from_headers(dict(headers), time.time())
+        classification = result.pop("classification", None)
+        if classification is not None and classification.account_action is AccountAction.DISABLE:
+            account.disabled_reason = classification.kind
+        return result
+
+    async def probe_credential(
+        self, api_key: str, **options: Any
+    ) -> Dict[str, Any]:
+        """Test a credential that has not been stored yet.
+
+        `test_account` is the same probe against an account already in the pool. The
+        reason this second entry point exists is the order of operations: storing
+        first and testing second turns a typo into a `disabled` row somebody has to
+        find and clean up later. Testing first means a wrong key is just a wrong key.
+        """
+        config = AccountConfig(
+            id="probe",
+            type=str(options.get("type") or "anthropic_api"),
+            api_key=api_key,
+            base_url=str(options.get("base_url") or ""),
+            options=dict(options.get("options") or {}),
+        )
+        try:
+            upstream = build_upstream(config)
+        except Exception as exc:  # noqa: BLE001 - a missing adapter extra lands here
+            return {"ok": False, "status": None, "latency": 0.0,
+                    "detail": f"{type(exc).__name__}: {exc}"}
+        return await self._probe(upstream)
+
+    async def _probe(self, upstream: Upstream) -> Dict[str, Any]:
+        """One GET /v1/models, and what it says. Shared by both test entry points."""
         started = time.time()
         try:
             response = await self.client.get(
@@ -430,17 +673,120 @@ class Gateway:
                 "latency": round(time.time() - started, 3),
             }
         latency = round(time.time() - started, 3)
-        account.mirror.update_from_headers(dict(response.headers), time.time())
-        if response.status_code < 300:
-            return {"ok": True, "status": response.status_code, "latency": latency,
-                    "detail": "credential accepted"}
-        classification = classify(
-            response.status_code, dict(response.headers), _safe_json(response)
-        )
-        if classification.account_action is AccountAction.DISABLE:
-            account.disabled_reason = classification.kind
-        return {"ok": False, "status": response.status_code, "latency": latency,
-                "detail": classification.detail or classification.kind}
+        result: Dict[str, Any] = {
+            "ok": response.status_code < 300,
+            "status": response.status_code,
+            "latency": latency,
+            "headers": dict(response.headers),
+        }
+        if result["ok"]:
+            result["detail"] = "credential accepted"
+        else:
+            classification = classify(
+                response.status_code, dict(response.headers), _safe_json(response)
+            )
+            result["detail"] = classification.detail or classification.kind
+            result["classification"] = classification
+        return result
+
+    async def diagnose_account(self, account_id: str, spend: bool = False) -> Dict[str, Any]:
+        """Test the credential, and check the rate-limit headers honestly.
+
+        The check itself is the project's largest open risk: if the upstream spells a
+        header differently, the window stays empty, the account reads as full, and
+        routing degrades to round-robin while every meter looks healthy.
+
+        The subtlety is where the headers come from. `GET /v1/models` is free, which
+        makes it the right probe for "does this credential work" — but it carries no
+        `anthropic-ratelimit-*` headers at all, so checking against it reports all
+        nine missing for a perfectly healthy account. Reporting that to someone who
+        has just added their first account would be worse than not checking.
+
+        So there are three answers, not two:
+
+        * ``checked`` — headers from a real ``/v1/messages`` response, either one this
+          account has already served or one this call paid for.
+        * ``not_observed`` — no request has been through this account yet. Nothing is
+          wrong; there is simply nothing to check. Send traffic, or ask for ``spend``.
+        * ``unobservable`` — this upstream reports no limit headers by design.
+        """
+        result = await self.test_account(account_id)
+        result.pop("headers", None)
+        account = self.accounts.get(account_id)
+        result["limits"] = None
+
+        if not result["ok"] or account is None:
+            result["limits_source"] = "unchecked"
+            return result
+
+        observable = bool(account.config.observable_limits)
+        result["observable"] = observable
+        headers: Dict[str, str] = dict(account.last_limit_headers)
+        if not headers and spend:
+            paid = await self._spend_one_request(account_id)
+            if paid is None:
+                result["limits_source"] = "unchecked"
+                result["detail"] = "the check request failed; the credential is fine"
+                return result
+            headers = paid
+        if not headers:
+            # Nothing seen yet. For an unobservable account that is the permanent
+            # answer, not a "come back later".
+            result["limits_source"] = "not_observed" if observable else "unobservable"
+            return result
+        if not observable and not looks_unified(headers):
+            # A subscription session that reports nothing we can read. Holding it to
+            # the API-key checklist would report a fault where there is none.
+            result["limits_source"] = "unobservable"
+            return result
+
+        result["limits"] = inspect_headers(headers, time.time())
+        result["limits_source"] = "checked"
+        return result
+
+    async def _spend_one_request(self, account_id: str) -> Optional[Dict[str, str]]:
+        """One `max_tokens=1` completion, purely to read its headers back.
+
+        The only place this gateway deliberately spends money, and it happens only
+        when a caller has asked for it. `tokenbiryani doctor` is the same trade made
+        from the terminal.
+        """
+        upstream = self.upstreams[account_id]
+        payload = {
+            "model": self._probe_model(),
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        try:
+            # Through the adapter, not a raw post: Bedrock and Vertex address the
+            # model in the URL, and a hand-rolled request would miss that.
+            result = await upstream.send(
+                self.client, MESSAGES_PATH, payload,
+                {"content-type": "application/json"}, timeout=30.0,
+            )
+        except Exception as exc:  # noqa: BLE001 - reported, never raised at a console
+            logger.warning("limit-header check failed for %r: %s", account_id, exc)
+            return None
+        if result.status >= 300:
+            return None
+        account = self.accounts.get(account_id)
+        if account is not None:
+            account.observe_headers(dict(result.headers), time.time())
+        return {
+            str(k).lower(): str(v)
+            for k, v in result.headers.items()
+            if str(k).lower().startswith("anthropic-ratelimit-")
+        }
+
+    def _probe_model(self) -> str:
+        """A model this pool is configured for, so the check is not rejected outright."""
+        for name in self.config.pricing:
+            # The bundled table is keyed by prefix (`claude-sonnet-5*`) so that dated
+            # model ids price correctly; the prefix itself is a valid model id.
+            stripped = name.rstrip("*")
+            if stripped and not stripped.endswith("-"):
+                return stripped
+        return "claude-sonnet-5"
 
     def redacted_account(self, record: Dict[str, Any]) -> Dict[str, Any]:
         # Every field holding a credential is stripped by name. A subscription's
@@ -647,6 +993,73 @@ class Gateway:
         redacted = {k: v for k, v in record.items() if k != "key_hash"}
         return plaintext, redacted
 
+    #: What a key's record may have changed after it is minted. The key material
+    #: itself is absent: a key is rotated by issuing a new one, not by editing a
+    #: hash in place, and `admin` is absent because quietly promoting a tenant key
+    #: is not an edit anybody should be able to make by typo.
+    KEY_EDITABLE = (
+        "models", "pool", "rpm", "spend_cap_usd", "priority", "max_wait_seconds",
+    )
+
+    async def update_key(self, name: str, **changes: Any) -> Dict[str, Any]:
+        """Edit a managed key's scope in place.
+
+        Without this, narrowing a key's pool means revoking it and reissuing — which
+        means every client holding it breaks. A key scoped to an account that has
+        since been removed is the common case, and it blocks config reload until
+        somebody fixes it.
+        """
+        if self.keys.is_config_key(name):
+            raise GatewayError(
+                409,
+                f"{name!r} is declared in the config file; edit it there and reload",
+                kind="invalid_request_error",
+            )
+        records = {str(r.get("name")): r for r in await self.store.list_keys()}
+        record = records.get(name)
+        if record is None:
+            raise GatewayError(404, f"no managed key {name!r}", kind="not_found_error")
+
+        rejected = [k for k in changes if k not in self.KEY_EDITABLE]
+        if rejected:
+            raise GatewayError(
+                400,
+                "cannot change {} on a key. Editable: {}".format(
+                    ", ".join(sorted(rejected)), ", ".join(self.KEY_EDITABLE)
+                ),
+                kind="invalid_request_error",
+            )
+        if changes.get("pool") is not None:
+            pool = list(changes["pool"])
+            unknown = [a for a in pool if a not in self.accounts]
+            if unknown:
+                raise GatewayError(
+                    400,
+                    "unknown account(s) in pool: {}".format(", ".join(sorted(unknown))),
+                    kind="invalid_request_error",
+                )
+            changes["pool"] = pool
+        if changes.get("priority") is not None:
+            priority = str(changes["priority"])
+            if priority not in ("interactive", "batch", "background"):
+                raise GatewayError(
+                    400,
+                    "priority must be interactive, batch or background",
+                    kind="invalid_request_error",
+                )
+            changes["priority"] = priority
+
+        # rpm, cap and wait are nullable: "no limit" has to be expressible, or a
+        # cap set once could never be lifted without reissuing the key.
+        nullable = ("rpm", "spend_cap_usd", "max_wait_seconds")
+        for field_name, value in changes.items():
+            if value is None and field_name not in nullable:
+                continue
+            record[field_name] = value
+        await self.store.put_key(record)
+        await self.refresh_keys()
+        return {k: v for k, v in record.items() if k != "key_hash"}
+
     async def revoke_key(self, name: str) -> bool:
         """Revoke a managed key. Config keys belong to the file, not to the API."""
         if self.keys.is_config_key(name):
@@ -717,6 +1130,13 @@ class Gateway:
         self.router = Router(config.routing.strategy, config.routing.weights)
         self.gate.max_size = config.queue.max_size
         self.gate.default_max_wait = config.queue.default_max_wait_seconds
+        self._file_pricing_table = config.pricing_table
+        # The file has just replaced every account's settings and the router. A
+        # console setting is an overlay on the file, not a one-time edit to it, so
+        # both go back on top — otherwise saving an unrelated line in the YAML
+        # would quietly revert them.
+        self._apply_all_overrides()
+        self.apply_settings()
 
         added = [account_id for account_id in after if account_id not in before]
         return {
@@ -819,12 +1239,6 @@ class Gateway:
                 )
 
             account.apply(classification, time.time(), plan.model)
-            self.metrics.incr(
-                "tokenbiryani_upstream_failures_total",
-                account=account.id,
-                kind=classification.kind,
-            )
-
             if classification.request_action is RequestAction.RETURN and result is not None:
                 plan.event.status = result.status
                 plan.event.error = classification.kind
@@ -936,12 +1350,6 @@ class Gateway:
             streamed=streamed,
         )
         event.priority = priority_name(priority)
-        self.metrics.incr(
-            "tokenbiryani_requests_total",
-            model=model,
-            key=key.name,
-            priority=priority_name(priority),
-        )
         return _Plan(
             body=body,
             headers=dict(headers),
@@ -1013,11 +1421,6 @@ class Gateway:
                 remaining_wait,
                 admission.retry_after + 0.25,
             )
-            self.metrics.incr(
-                "tokenbiryani_queued_total",
-                model=plan.model,
-                priority=priority_name(plan.priority),
-            )
             waited_from = time.time()
             try:
                 await self.gate.wait(plan.priority, budget)
@@ -1072,7 +1475,6 @@ class Gateway:
             plan.deadline, time.time() + max(0.0, plan.max_wait - plan.queued_seconds)
         )
         started = time.time()
-        self.metrics.incr("tokenbiryani_batch_spills_total", account=account.id)
         try:
             outcome = await batch_lane.run_single(
                 self.client,
@@ -1083,7 +1485,6 @@ class Gateway:
                 deadline,
             )
         except batch_lane.BatchTimeout as exc:
-            self.metrics.incr("tokenbiryani_batch_timeouts_total", account=account.id)
             error = GatewayError(
                 429,
                 "batch did not finish within this request's wait budget; it was "
@@ -1098,7 +1499,6 @@ class Gateway:
         except (batch_lane.BatchUnavailable, httpx.HTTPError) as exc:
             # The spill lane is an optimisation, never a dependency: fall back to
             # the normal queue rather than failing the request.
-            self.metrics.incr("tokenbiryani_batch_fallbacks_total", account=account.id)
             logger.info("batch spill unavailable, falling back to queue: %s", exc)
             plan.event.attempts.append(
                 Attempt(account_id=account.id, kind="batch_unavailable", detail=str(exc)[:200])
@@ -1185,7 +1585,7 @@ class Gateway:
         latency = time.time() - started
         now = time.time()
         if result is not None:
-            account.mirror.update_from_headers(result.headers, now)
+            account.observe_headers(dict(result.headers), now)
         usage = Usage.from_body(result.body if result else None)
         account.mirror.release(
             lease,
@@ -1224,9 +1624,9 @@ class Gateway:
                         await response.aread()
                         body = _safe_json(response)
                         classification = classify(status, dict(response.headers), body)
-                        account.mirror.update_from_headers(dict(response.headers), time.time())
+                        account.observe_headers(dict(response.headers), time.time())
                     else:
-                        account.mirror.update_from_headers(dict(response.headers), time.time())
+                        account.observe_headers(dict(response.headers), time.time())
                         buffered: List[bytes] = []
                         grace = started + self.config.retry.first_token_grace_seconds
                         async for chunk in upstream.iter_sse(response):
@@ -1286,12 +1686,6 @@ class Gateway:
                 return
 
             account.apply(classification, now, plan.model)
-            self.metrics.incr(
-                "tokenbiryani_upstream_failures_total",
-                account=account.id,
-                kind=classification.kind,
-            )
-
             if committed:
                 # Past the commit boundary: the client has content. Report, don't retry.
                 plan.event.error = classification.kind
@@ -1355,8 +1749,6 @@ class Gateway:
         price = self.config.price_for(plan.model)
         cost = account.record_success(latency, usage, price, now, cost_multiplier)
 
-        if decision.affinity_broken:
-            self.metrics.incr("tokenbiryani_cache_breaks_total", model=plan.model)
         await self.store.set_affinity(
             plan.session, account.id, self.config.routing.affinity_ttl_seconds
         )
@@ -1384,21 +1776,6 @@ class Gateway:
         self.events.record(event)
         await self._record_usage(event)
 
-        self.metrics.incr("tokenbiryani_responses_total", account=account.id, status=str(status))
-        self.metrics.incr(
-            "tokenbiryani_tokens_total", usage.input_tokens, account=account.id, kind="input"
-        )
-        self.metrics.incr(
-            "tokenbiryani_tokens_total", usage.output_tokens, account=account.id, kind="output"
-        )
-        self.metrics.incr(
-            "tokenbiryani_tokens_total",
-            usage.cache_read_tokens,
-            account=account.id,
-            kind="cache_read",
-        )
-        if len(event.attempts) > 1:
-            self.metrics.incr("tokenbiryani_failovers_total", model=plan.model)
 
     async def _record_usage(self, event: RequestEvent) -> None:
         """Persist one request's accounting so the charts survive a restart.
@@ -1420,7 +1797,6 @@ class Gateway:
         # Failures are history too. A usage chart that shows only successes hides
         # the outage, which is exactly what someone opens it to find.
         await self._record_usage(plan.event)
-        self.metrics.incr("tokenbiryani_gateway_errors_total", kind=error.kind)
 
     async def simple_request(
         self,
@@ -1460,7 +1836,7 @@ class Gateway:
                 else:
                     sent = await upstream.send(self.client, path, body or {}, headers)
                     result = sent
-                account.mirror.update_from_headers(dict(result.headers), time.time())
+                account.observe_headers(dict(result.headers), time.time())
                 if result.status < 500 and result.status != 429:
                     return Completion(
                         status=result.status,
@@ -1474,40 +1850,6 @@ class Gateway:
         raise last or GatewayError(502, "all accounts failed")
 
     # ---- introspection -------------------------------------------------------
-
-    def _register_metrics(self) -> None:
-        m = self.metrics
-        m.declare("tokenbiryani_requests_total", "Requests accepted by the gateway")
-        m.declare("tokenbiryani_responses_total", "Successful upstream responses")
-        m.declare("tokenbiryani_upstream_failures_total", "Upstream failures by class")
-        m.declare("tokenbiryani_gateway_errors_total", "Errors generated by the gateway")
-        m.declare("tokenbiryani_failovers_total", "Requests that needed more than one account")
-        m.declare("tokenbiryani_cache_breaks_total", "Requests routed away from their cache owner")
-        m.declare("tokenbiryani_queued_total", "Requests that waited for capacity")
-        m.declare("tokenbiryani_batch_spills_total", "Requests diverted to the Batches API")
-        m.declare("tokenbiryani_batch_timeouts_total", "Spilled batches that outlived their budget")
-        m.declare("tokenbiryani_batch_fallbacks_total", "Spills that fell back to the queue")
-        m.declare("tokenbiryani_tokens_total", "Tokens by account and kind")
-
-        def headroom_gauge():
-            now = time.time()
-            for account in self.accounts.values():
-                yield ((("account", account.id),), account.mirror.headroom(now))
-
-        def inflight_gauge():
-            for account in self.accounts.values():
-                yield ((("account", account.id),), float(account.inflight))
-
-        def queue_gauge():
-            yield ((), float(self.gate.depth))
-
-        m.register_gauge(
-            "tokenbiryani_account_headroom", "Binding headroom fraction per account", headroom_gauge
-        )
-        m.register_gauge(
-            "tokenbiryani_account_inflight", "In-flight requests per account", inflight_gauge
-        )
-        m.register_gauge("tokenbiryani_queue_depth", "Requests waiting for capacity", queue_gauge)
 
     def capacity_horizon(self, minutes: int = 60, buckets: int = 12) -> Dict[str, Any]:
         """Projected input-token capacity over the next hour.
@@ -1555,6 +1897,15 @@ class Gateway:
         entry["max_concurrency"] = getattr(config, "max_concurrency", None)
         entry["spend_cap_usd"] = getattr(config, "spend_cap_usd", None)
         entry["observable_limits"] = bool(getattr(config, "observable_limits", True))
+        override = self._account_overrides.get(runtime.id) or {}
+        entry["overridden"] = sorted(override) if override else []
+        if config.type == "oauth":
+            upstream = self.upstreams.get(runtime.id)
+            describe = getattr(upstream, "describe_source", None)
+            expiry = getattr(upstream, "source_expiry", None)
+            entry["token_source"] = getattr(upstream, "source_kind", "login")
+            entry["token_source_detail"] = describe() if describe is not None else ""
+            entry["token_expires_at"] = expiry() if expiry is not None else None
         if config.type == "oauth":
             entry.update(self._oauth_meta.get(runtime.id, {
                 "session_expires_at": None, "can_refresh": False,
@@ -1611,12 +1962,20 @@ class Gateway:
             if a.state(now) is AccountState.READY
         ]
         ready_tokens = 0
+        # Accounts whose budget is a percentage cannot be added to a token count.
+        # Counting them as zero would read as "nothing available" on a pool that is
+        # in fact half full, so they are reported separately as headroom.
+        ready_headroom = None
         for account in ready:
             available = account.mirror.input_tokens.available(
                 account.mirror.reserved_input, now
             )
             if available is not None:
                 ready_tokens += available
+            elif account.mirror.unified_known:
+                headroom = account.mirror.headroom(now)
+                if ready_headroom is None or headroom > ready_headroom:
+                    ready_headroom = headroom
         resets = []
         for account in self.accounts.values():
             reset = account.mirror.next_reset(now)
@@ -1624,6 +1983,14 @@ class Gateway:
                 resets.append(reset)
         return {
             "strategy": self.router.strategy,
+            # What the console needs to explain an empty cost column: whether any
+            # model is priced at all, and — if the bundled table is in use — how old
+            # it is. A stale price should be visible, not silent.
+            "pricing": {
+                "models": len(self.config.pricing),
+                "as_of": self.config.pricing_as_of,
+                "source": self.config.pricing_source,
+            },
             "accounts": accounts,
             "pool": {
                 "total": len(self.accounts),
@@ -1635,6 +2002,11 @@ class Gateway:
                     1 for a in self.accounts.values() if a.state(now) is AccountState.DISABLED
                 ),
                 "ready_input_tokens": ready_tokens,
+                #: Best headroom among ready accounts that report a fraction rather
+                #: than a count. None when every ready account reports a count.
+                "ready_headroom": (
+                    None if ready_headroom is None else round(ready_headroom, 4)
+                ),
                 "next_reset_seconds": round(min(resets), 1) if resets else None,
             },
             "queue": self.gate.snapshot(),

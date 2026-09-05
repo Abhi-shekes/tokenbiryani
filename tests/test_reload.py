@@ -7,11 +7,11 @@ import time
 import httpx
 import pytest
 from conftest import BASE_URL, body, build, make_config
+from support.mock_upstream import rate_limit
 
 from tokenbiryani.api.app import create_app
 from tokenbiryani.core.account import AccountState
 from tokenbiryani.core.gateway import GatewayError
-from tokenbiryani.testing.mock_upstream import rate_limit
 
 AUTH = {"x-api-key": "bir_test"}
 

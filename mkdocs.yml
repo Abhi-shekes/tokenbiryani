@@ -46,6 +46,7 @@ nav:
   - Deployment: deployment.md
   - Extending: extending.md
   - Console design: UI-DESIGN.md
+  - Onboarding plan: UX-PLAN.md
   - Decisions:
       - Sticky affinity by default: adr/0001-sticky-affinity-by-default.md
       - Error taxonomy: adr/0002-error-taxonomy.md

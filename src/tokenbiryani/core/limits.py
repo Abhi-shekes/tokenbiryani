@@ -14,7 +14,7 @@ import datetime as _dt
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 #: Rough bytes-per-token for JSON-serialised request bodies. Deliberately low
 #: (pessimistic: it over-counts tokens) so leases err toward reserving too much.
@@ -135,6 +135,71 @@ class LimitWindow:
         self.updated_at = now
 
 
+#: The rolling windows a Claude subscription session reports. An API-key account
+#: sends {limit, remaining, reset} triples; a subscription sends how much of a
+#: rolling window it has spent, and nothing else.
+UNIFIED_WINDOWS = ("5h", "7d")
+
+#: The only unified status that means "this request would be refused right now".
+#: Anything else — `allowed`, `allowed_warning` — is a request we should still make.
+UNIFIED_REJECTED = "rejected"
+
+
+@dataclass
+class UnifiedWindow:
+    """One `anthropic-ratelimit-unified-*` window: how much of it is spent.
+
+    A subscription session says `utilization: 0.34`, not "412 requests left", so
+    there is no budget to lease against — but `1 - utilization` is a measured
+    headroom number, and routing on that is not the same as routing on a guess.
+    Leases and the capacity horizon still cannot use it: both need absolute token
+    counts, and a fraction cannot be decremented by 4,000 tokens.
+    """
+
+    status: Optional[str] = None
+    utilization: Optional[float] = None
+    reset_at: Optional[float] = None
+    updated_at: Optional[float] = None
+
+    @property
+    def known(self) -> bool:
+        return self.utilization is not None
+
+    @property
+    def rejected(self) -> bool:
+        return (self.status or "").lower() == UNIFIED_REJECTED
+
+    def headroom(self) -> Optional[float]:
+        if self.utilization is None:
+            return None
+        return max(0.0, min(1.0, 1.0 - self.utilization))
+
+    def seconds_to_reset(self, now: float) -> Optional[float]:
+        if self.reset_at is None:
+            return None
+        return max(0.0, self.reset_at - now)
+
+    def update(
+        self,
+        status: Optional[str],
+        utilization: Optional[str],
+        reset: Optional[str],
+        now: float,
+    ) -> None:
+        if status is not None:
+            self.status = str(status)
+        if utilization is not None:
+            try:
+                self.utilization = float(utilization)
+            except (TypeError, ValueError):
+                pass
+        parsed_reset = parse_reset(reset)
+        if parsed_reset is not None:
+            self.reset_at = parsed_reset
+        if status is not None or utilization is not None:
+            self.updated_at = now
+
+
 @dataclass
 class Lease:
     """An atomic reservation held against an account for the life of one request."""
@@ -161,6 +226,13 @@ class LimitMirror:
     input_tokens: LimitWindow = field(default_factory=LimitWindow)
     output_tokens: LimitWindow = field(default_factory=LimitWindow)
 
+    #: Subscription sessions report these instead of the three windows above. They
+    #: are read whatever `observable` says: an account that sends both should be
+    #: held to whichever is tighter.
+    unified: Dict[str, UnifiedWindow] = field(
+        default_factory=lambda: {name: UnifiedWindow() for name in UNIFIED_WINDOWS}
+    )
+
     observable: bool = True
     assumed_headroom: float = 0.5
 
@@ -185,6 +257,14 @@ class LimitMirror:
         ):
             limit, remaining, reset = triple(prefix)
             window.update(limit, remaining, reset, now)
+
+        for name, rolling in self.unified.items():
+            rolling.update(
+                lowered.get(f"anthropic-ratelimit-unified-{name}-status"),
+                lowered.get(f"anthropic-ratelimit-unified-{name}-utilization"),
+                lowered.get(f"anthropic-ratelimit-unified-{name}-reset"),
+                now,
+            )
 
     def reserve(self, estimate: TokenEstimate, account_id: str) -> Lease:
         lease = Lease(
@@ -230,6 +310,10 @@ class LimitMirror:
                 window.remaining = max(0, current - int(actual))
 
     def can_serve(self, estimate: TokenEstimate, now: float) -> bool:
+        # A unified window that says `rejected` is the upstream telling us the next
+        # request is a 429. Believing it is cheaper than proving it.
+        if self.unified_rejected():
+            return False
         checks = (
             (self.requests, self.reserved_requests, 1),
             (self.input_tokens, self.reserved_input, estimate.input_tokens),
@@ -251,19 +335,44 @@ class LimitMirror:
                 return True
         return False
 
+    @property
+    def unified_known(self) -> bool:
+        return any(window.known for window in self.unified.values())
+
+    def unified_headroom(self) -> Optional[float]:
+        """The tightest unified window, or None when none were reported."""
+        values: List[float] = []
+        for window in self.unified.values():
+            headroom = window.headroom()
+            if headroom is not None:
+                values.append(headroom)
+        return min(values) if values else None
+
+    def unified_rejected(self) -> bool:
+        return any(window.rejected for window in self.unified.values())
+
     def headroom(self, now: float) -> float:
-        """The binding constraint across all three dimensions."""
+        """The binding constraint across every dimension the upstream reported.
+
+        Unobservable used to mean "guess `assumed_headroom` and hope". It only has
+        to mean that when the upstream reported nothing at all: a subscription
+        session reports unified utilisation, which is a measurement, and a guess
+        must never win a comparison against one.
+        """
+        unified = self.unified_headroom()
         if not self.observable and not self.input_tokens.known:
-            return self.assumed_headroom
-        return min(
+            return self.assumed_headroom if unified is None else unified
+        classic = min(
             self.requests.fraction(self.reserved_requests, now),
             self.input_tokens.fraction(self.reserved_input, now),
             self.output_tokens.fraction(self.reserved_output, now),
         )
+        return classic if unified is None else min(classic, unified)
 
     def next_reset(self, now: float) -> Optional[float]:
-        candidates = []
-        for window in (self.requests, self.input_tokens, self.output_tokens):
+        candidates: List[float] = []
+        classic: List[Any] = [self.requests, self.input_tokens, self.output_tokens]
+        for window in classic + list(self.unified.values()):
             seconds = window.seconds_to_reset(now)
             if seconds is not None:
                 candidates.append(seconds)
@@ -281,10 +390,24 @@ class LimitMirror:
                 "reset_in": None if reset_in is None else round(reset_in, 1),
             }
 
+        def unified(w: UnifiedWindow) -> Dict[str, Any]:
+            reset_in = w.seconds_to_reset(now)
+            headroom = w.headroom()
+            return {
+                "status": w.status,
+                "utilization": None if w.utilization is None else round(w.utilization, 4),
+                "headroom": None if headroom is None else round(headroom, 4),
+                "reset_in": None if reset_in is None else round(reset_in, 1),
+            }
+
         return {
             "observable": self.observable,
             "requests": window(self.requests, self.reserved_requests),
             "input_tokens": window(self.input_tokens, self.reserved_input),
             "output_tokens": window(self.output_tokens, self.reserved_output),
             "headroom": round(self.headroom(now), 4),
+            # Present but empty for an API-key account, so the console can render
+            # one shape and decide what to draw from `unified_known`.
+            "unified": {name: unified(w) for name, w in self.unified.items()},
+            "unified_known": self.unified_known,
         }

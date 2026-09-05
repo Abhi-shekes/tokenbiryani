@@ -56,15 +56,18 @@ accounts:
   - {id: acct-03, name: Mock 3, type: anthropic_api, api_key: key-03, base_url: "http://127.0.0.1:$UPSTREAM_PORT", cost_tier: 2.5}
 keys:
   - {key: $KEY, name: admin, admin: true}
-pricing:
-  claude-*: {input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75}
+# The dated table that ships with the release, so the cost charts show real rates
+# rather than invented ones.
+pricing: builtin
 YAML
   echo "  wrote tokenbiryani.yaml    (mock-backed; gitignored)"
 fi
 
 wait_for() {
+  # Any HTTP answer means it is listening. Not -f: the mock authenticates
+  # /v1/models, so a keyless probe there is a 401 from a healthy server.
   local url=$1 name=$2 tries=0
-  until curl -sf -o /dev/null "$url"; do
+  until curl -s -o /dev/null "$url"; do
     tries=$((tries + 1))
     if [ $tries -gt 60 ]; then echo "  $name never came up at $url" >&2; exit 1; fi
     sleep 0.25
@@ -76,7 +79,9 @@ if [ "$WITH_MOCK" = 1 ]; then
     echo "  mock upstream        already listening on :$UPSTREAM_PORT — reusing it"
   else
     # These keys are the ones tokenbiryani.yaml hands to its three accounts.
-    "$PY" -m tokenbiryani.testing.server --port "$UPSTREAM_PORT" \
+    # From the source tree: the fake upstream is test scaffolding and is no longer
+    # part of the installed package.
+    PYTHONPATH="$ROOT/tests" "$PY" -m support.server --port "$UPSTREAM_PORT" \
       --accounts key-01,key-02,key-03 >/tmp/tokenbiryani-mock.log 2>&1 &
     PIDS+=($!)
     wait_for "http://127.0.0.1:$UPSTREAM_PORT/v1/models" "mock upstream"

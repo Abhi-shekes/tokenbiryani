@@ -73,6 +73,15 @@ class AccountRuntime:
     disabled_reason: Optional[str] = None
     unsupported_models: Set[str] = field(default_factory=set)
 
+    #: The `anthropic-ratelimit-*` headers seen on the last real response from this
+    #: account, kept verbatim so the header check has something true to inspect.
+    #:
+    #: It cannot use a `/v1/models` probe: that endpoint carries no limit headers, so
+    #: checking against it reports all nine missing for a perfectly healthy account.
+    #: Empty means no request has been through this account yet — which is a third
+    #: answer, distinct from "checked and fine" and "checked and broken".
+    last_limit_headers: Dict[str, str] = field(default_factory=dict)
+
     inflight: int = 0
     outcomes: Deque[bool] = field(default_factory=lambda: deque(maxlen=WINDOW))
     latencies: Deque[float] = field(default_factory=lambda: deque(maxlen=WINDOW))
@@ -91,6 +100,17 @@ class AccountRuntime:
         return self.config.id
 
     # ---- state ---------------------------------------------------------------
+
+    def observe_headers(self, headers: Dict[str, str], now: float) -> None:
+        """Update the mirror, and remember the limit headers it was given."""
+        self.mirror.update_from_headers(headers, now)
+        seen = {
+            str(k).lower(): str(v)
+            for k, v in headers.items()
+            if str(k).lower().startswith("anthropic-ratelimit-")
+        }
+        if seen:
+            self.last_limit_headers = seen
 
     def state(self, now: float) -> AccountState:
         if not self.config.enabled:

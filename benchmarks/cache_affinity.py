@@ -29,11 +29,16 @@ import sys
 import time
 from typing import Any, Dict, List
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+sys.path.insert(0, os.path.join(_ROOT, "src"))
+# The fake upstream is test scaffolding and no longer ships inside the package, so
+# this reaches it where it lives rather than where tokenbiryani is installed.
+sys.path.insert(0, os.path.join(_ROOT, "tests"))
+
+from support.mock_upstream import MockAnthropic  # noqa: E402
 
 from tokenbiryani.config import Config, KeyConfig  # noqa: E402
 from tokenbiryani.core.gateway import Gateway  # noqa: E402
-from tokenbiryani.testing.mock_upstream import MockAnthropic  # noqa: E402
 
 BASE_URL = "https://mock.anthropic.test"
 

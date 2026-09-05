@@ -22,7 +22,7 @@ docker compose down
 
 ## The mock upstream is the point
 
-`tokenbiryani.testing.mock_upstream` is a scriptable fake Anthropic API. Every routing
+`tests/support/mock_upstream.py` is a scriptable fake Anthropic API. Every routing
 behaviour in this project is a reaction to something an upstream did — a 429 with a
 `retry-after`, a 529, a stream that dies mid-flight, a limit header counting down — and
 none of that is testable against the real API without spending money and waiting on real
@@ -34,10 +34,14 @@ mock.script("acct-02", stream_disconnect(after_chunks=3))
 mock.accounts["acct-01"].exhaust()
 ```
 
+It lives under `tests/` rather than in the package: it is scaffolding for this suite,
+and shipping it would put a runnable fake Anthropic on every user's machine. The suite
+imports it as `support.mock_upstream`; outside the suite, put `tests/` on the path.
+
 It also runs as a real server for smoke tests:
 
 ```bash
-python -m tokenbiryani.testing.server --port 9911 --accounts key-a,key-b
+PYTHONPATH=tests python -m support.server --port 9911 --accounts key-a,key-b
 ```
 
 ## The benchmark

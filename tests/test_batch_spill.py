@@ -128,8 +128,13 @@ async def test_spill_prefers_the_cache_owner(gateway_factory, mock, key):
     assert completion.headers["x-tokenbiryani-account"] == owner
 
 
-async def test_spills_are_counted(gateway_factory, mock, key):
+async def test_spills_are_recorded(gateway_factory, mock, key):
+    """A spilled request has to be tellable from a normal one after the fact.
+
+    This was a Prometheus counter; the request's own `via` field is the durable
+    record, and it is what the inspector shows.
+    """
     gateway = gateway_factory(["a"], overrides=SPILL_ON)
     saturate(gateway)
     await gateway.complete(body(), BATCH, key)
-    assert "tokenbiryani_batch_spills_total" in gateway.metrics.render()
+    assert gateway.events.recent(1)[0]["via"] == "batch"
