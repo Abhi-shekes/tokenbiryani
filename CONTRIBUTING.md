@@ -4,7 +4,7 @@
 cd tokenbiryani
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev,secrets]"
-pytest                 # 312 tests
+pytest                 # 379 tests
 bash scripts/smoke.sh  # end-to-end over real sockets
 ```
 
@@ -92,6 +92,87 @@ Both live behind clean interfaces with the mock available to test against:
   and optionally override `send`/`open_stream`, plus `iter_sse` if the platform does
   not stream SSE natively. `providers/bedrock.py` is the awkward case worth reading:
   SigV4 per request and a binary event-stream decoded back to SSE.
+
+## Branches
+
+`main` is the trunk and the only long-lived branch. It is protected: no direct
+pushes, no force-pushes, no deletion, and every commit on it arrived through a pull
+request whose checks were green. History is linear — merges are squashes, so `main`
+reads as one commit per change rather than a braid.
+
+Work happens on a short-lived branch off `main`, named for what it does:
+
+| Prefix | For |
+|---|---|
+| `feat/` | a new capability |
+| `fix/` | a defect with a reproduction |
+| `docs/` | documentation only |
+| `chore/` | dependencies, CI, tooling, release mechanics |
+| `refactor/` | behaviour-preserving change, with the tests to prove it |
+
+```bash
+git switch -c fix/lease-released-twice main
+# ... work, commit ...
+git push -u origin fix/lease-released-twice
+gh pr create --fill
+```
+
+Keep them short. A branch that lives a week is a merge conflict with someone else's
+week, and this project's files — `core/gateway.py`, `console.html` — are exactly the
+ones two branches both want.
+
+### Commit messages
+
+A subject line in the imperative that says what changed, then a body that says what
+was wrong. The body is the valuable half: the log is the only place the reasoning
+survives, and "fix bug" in six months is a mystery. `git log` shows the standard.
+
+## Changelog
+
+`CHANGELOG.md` is written as you go, not reconstructed at release time. Every pull
+request that changes something a user would notice adds a line under
+`## [Unreleased]`, and CI fails the PR if it does not. If the change genuinely is
+invisible — a test, a refactor, a typo — apply the **`no-changelog`** label and the
+check stands down.
+
+Write for someone upgrading, not for the reviewer. "Fixed a bug in the router" tells
+them nothing; "a 400 from one account no longer retries across the whole pool" tells
+them whether they were affected.
+
+## Releasing
+
+The tag is the release. Everything else — PyPI, the GHCR image, the docs site, the
+GitHub release and its notes — is produced by `.github/workflows/release.yml` from
+that tag, so there is no manual publishing step to get wrong or to forget.
+
+1. Move `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`, and open a
+   fresh empty `## [Unreleased]` above it.
+2. Bump the version in **both** `pyproject.toml` and `src/tokenbiryani/__init__.py`.
+3. Merge that through a pull request like anything else.
+4. Tag the merge commit and push it:
+
+   ```bash
+   git switch main && git pull
+   git tag -a v0.2.0 -m "tokenbiryani 0.2.0"
+   git push origin v0.2.0
+   ```
+
+The workflow refuses the release unless the tag, `pyproject.toml` and `__init__.py`
+all name the same version and `CHANGELOG.md` has a dated section for it — the three
+ways a release usually ends up describing a version it is not. Check what it will
+say before you tag:
+
+```bash
+python scripts/changelog.py check v0.2.0     # the guard the workflow runs
+python scripts/changelog.py extract v0.2.0   # the notes it will publish
+```
+
+PyPI publishing is gated on the repository variable `PYPI_PUBLISH` so that tags do
+not fail while no trusted publisher exists. Turn it on once one does:
+
+```bash
+gh variable set PYPI_PUBLISH --body true
+```
 
 ## House rules
 

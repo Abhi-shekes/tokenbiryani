@@ -151,9 +151,11 @@ docker compose up -d      # gateway + Redis + a mock Anthropic
 docker compose down       # stop it
 ```
 
-Nothing to set first. The stack boots against the mock upstream bundled with the
-package, so it comes up healthy, costs nothing and reaches nothing — then you open
-`http://localhost:8787/console` and add real accounts there.
+Nothing to set first. The stack comes up with an empty pool, which is what the
+onboarding wizard is for: open `http://localhost:8787/console` and add your first
+credential there. Until you do, `/healthz` answers 503 and the container reports
+itself unhealthy — an honest answer, since a pool with no accounts can serve
+nothing.
 
 `./src` is bind-mounted and watched, so editing a file on the host restarts the
 gateway in about a second; the console's HTML and CSS need only a browser refresh;
@@ -409,7 +411,7 @@ structured logs, config hot reload, the admin API, and the CLI. Request priority
 per-request wait budget, a batch spill lane, and SQLite-backed persistence for affinity
 and windowed spend, a Redis store for multi-instance deployments, and runtime key
 management behind an admin boundary, plus Bedrock and Vertex adapters and pluggable
-routing strategies, and the operator console. 204 tests including a lease-concurrency
+routing strategies, and the operator console. 379 tests including a lease-concurrency
 suite, a reproducible benchmark, and an end-to-end smoke test over real sockets
 (`scripts/smoke.sh`).
 

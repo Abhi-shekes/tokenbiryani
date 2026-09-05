@@ -3,6 +3,47 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- A release workflow. A `v*` tag is now the only thing that publishes: it refuses to
+  run unless the tag, `pyproject.toml` and `__init__.py` name the same version and
+  `CHANGELOG.md` has a dated section for it, then builds the wheel, creates the
+  GitHub release with notes quoted from that section, pushes the multi-arch image to
+  GHCR and deploys the docs. PyPI publishing waits behind the `PYPI_PUBLISH`
+  repository variable so a tag cannot fail on a trusted publisher that does not
+  exist yet.
+- `scripts/changelog.py`, the single reader of `CHANGELOG.md`, so the release notes
+  and the changelog cannot drift apart.
+- CI fails a pull request that changes user-visible behaviour without a changelog
+  line, unless it carries the `no-changelog` label.
+- CI packages the wheel on every run and asserts what is inside it — the price
+  table and the console are there, the test scaffolding is not. That was previously
+  discovered at release time.
+- Branch and release process in `CONTRIBUTING.md`: `main` is protected and linear,
+  work lands through short-lived prefixed branches, and the changelog is written as
+  you go.
+
+### Fixed
+- CI ran on pushes to `main` while the default branch was `master`, so no push to
+  the trunk had ever triggered it. The branch is now `main`.
+- The browser suites ran in all three matrix entries against whatever Chrome the
+  runner happened to have, on top of the dedicated `ui` job that installs a pinned
+  Chromium. A real timeout therefore surfaced as a Python 3.8 failure. They now run
+  once, in `ui`.
+- The compose check asserted three ready accounts and waited for a healthy gateway,
+  neither of which the stack does since it started coming up with an empty pool. It
+  now asserts the empty-pool state, adds the first account through the admin API,
+  and checks that readiness follows — which tests the documented first run instead
+  of a state the stack no longer has.
+- `README.md` still said the compose stack boots against a bundled mock and comes up
+  healthy. It comes up empty, and says so.
+- `ruff` and `mypy` ran once per Python version for no benefit; they are one job now.
+
+### Changed
+- Workflows declare `permissions: contents: read` by default and raise it per job,
+  pull-request runs supersede their predecessors, and every job has a timeout.
+
 ## [0.1.0] - 2026-09-05
 
 ### Added
