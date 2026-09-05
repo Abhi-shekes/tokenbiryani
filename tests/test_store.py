@@ -264,3 +264,24 @@ async def test_against_a_real_redis_server():
         assert await store.record_key_request("k", time.time()) == 1
     finally:
         await store.close()
+
+
+async def test_deleting_an_account_releases_its_sessions(store):
+    """A session pinned to a deleted account would otherwise report a cache break
+    on every request until its TTL expired."""
+    await store.set_affinity("fp:one", "acct-01", 600)
+    await store.set_affinity("fp:two", "acct-01", 600)
+    await store.set_affinity("fp:three", "acct-02", 600)
+
+    dropped = await store.clear_affinity_for_account("acct-01")
+
+    assert dropped == 2
+    assert await store.get_affinity("fp:one") is None
+    assert await store.get_affinity("fp:two") is None
+    assert await store.get_affinity("fp:three") == "acct-02", "other owners untouched"
+
+
+async def test_releasing_an_unknown_account_is_a_no_op(store):
+    await store.set_affinity("fp:one", "acct-01", 600)
+    assert await store.clear_affinity_for_account("acct-99") == 0
+    assert await store.get_affinity("fp:one") == "acct-01"

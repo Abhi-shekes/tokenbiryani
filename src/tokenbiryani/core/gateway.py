@@ -31,6 +31,7 @@ from ..observability.usage import (
 )
 from ..providers.anthropic_api import build_upstream
 from ..providers.base import BLOCKED_RESPONSE_HEADERS, Upstream
+from ..providers.translate import map_model
 from ..proxy import sse
 from ..proxy.errors import (
     AccountAction,
@@ -39,14 +40,30 @@ from ..proxy.errors import (
     classify,
     classify_exception,
 )
-from ..store.base import SCOPE_ACCOUNT, SCOPE_KEY, StateStore, build_store
+from ..store.base import (
+    SCOPE_ACCOUNT,
+    SCOPE_KEY,
+    SCOPE_SESSION,
+    SCOPE_SESSION_TURNS,
+    StateStore,
+    build_store,
+)
 from . import batch as batch_lane
 from .account import AccountRuntime, AccountState, Usage
 from .breaker import CircuitBreaker
+from .cacheadvice import (
+    CacheAdvisor,
+    cacheable_prefix_tokens,
+    has_cache_breakpoint,
+    insert_cache_breakpoint,
+)
 from .diagnostics import inspect_headers, looks_unified
+from .estimator import OutputEstimator
 from .keys import KeyRegistry, generate_key, record_from_config
 from .limits import LimitMirror, TokenEstimate, estimate_request
 from .oauth import OAuthClient, OAuthError, OAuthTokens, PendingLogin, make_verifier
+from .pacing import PaceReading, PacingGovernor
+from .pacing import week_start as _pacing_week_start
 from .queue import (
     MAX_WAIT_HEADER,
     PRIORITY_BATCH,
@@ -120,6 +137,42 @@ def _response_headers(upstream_headers: Mapping[str, str], account_id: str) -> D
     return out
 
 
+#: How long a computed pace is reused for. A quota window is days long; a request
+#: does not need a fresher number than this, and pacing reads the spend ledger.
+PACE_CACHE_SECONDS = 5.0
+
+
+def _pacing_settings(config: Config) -> Dict[str, Any]:
+    pacing = config.pacing
+    return {
+        "enabled": pacing.enabled,
+        "mode": pacing.mode,
+        "window": pacing.window,
+        "curve": pacing.curve,
+        "ahead_threshold": pacing.ahead_threshold,
+        "behind_threshold": pacing.behind_threshold,
+        "max_batch_delay_seconds": pacing.max_batch_delay_seconds,
+        "weekly_budget_usd": pacing.weekly_budget_usd,
+    }
+
+
+def _build_pacing(config: Config) -> PacingGovernor:
+    return PacingGovernor(**_pacing_settings(config))
+
+
+def _build_estimator(config: Config) -> OutputEstimator:
+    """One estimator per gateway, configured from `routing.*`."""
+    routing = config.routing
+    return OutputEstimator(
+        mode=routing.output_estimate,
+        quantile=routing.output_estimate_quantile,
+        min_samples=routing.output_estimate_min_samples,
+        window=routing.output_estimate_window,
+        floor=routing.output_estimate_floor,
+        max_undershoot=routing.output_estimate_max_undershoot,
+    )
+
+
 class Gateway:
     def __init__(
         self,
@@ -133,6 +186,15 @@ class Gateway:
         self.events = EventLog(config.observability.event_buffer)
         self.gate = CapacityGate(config.queue.max_size, config.queue.default_max_wait_seconds)
         self.router = Router(config.routing.strategy, config.routing.weights)
+        self.estimator = _build_estimator(config)
+        self.cache_advisor = CacheAdvisor(
+            min_requests=config.cache.advice_min_requests
+        )
+        self.pacing = _build_pacing(config)
+        #: Pacing reads the spend ledger, which is a store round trip. A request
+        #: does not need a fresher answer than this — a quota window is days long.
+        self._pace_value: Optional[float] = None
+        self._pace_cached_at: float = 0.0
 
         self.accounts: Dict[str, AccountRuntime] = {}
         self.upstreams: Dict[str, Upstream] = {}
@@ -618,6 +680,17 @@ class Gateway:
                 kind="invalid_request_error",
             )
         removed = await self.store.delete_account(account_id)
+        # Before the pool is rebuilt: every session pinned here now names a
+        # credential that no longer exists, and leaving them to expire would
+        # report a cache break on each one for the rest of the affinity TTL.
+        # `clear_override` deliberately does not do this — that account survives,
+        # it only stops being overridden.
+        try:
+            dropped = await self.store.clear_affinity_for_account(account_id)
+            if dropped:
+                logger.info("released %d session(s) pinned to %s", dropped, account_id)
+        except Exception:  # noqa: BLE001 - a store blip must not fail the delete
+            logger.warning("could not release affinity for %s", account_id, exc_info=True)
         await self.refresh_accounts()
         return removed
 
@@ -985,6 +1058,8 @@ class Gateway:
             spend_cap_usd=options.get("spend_cap_usd"),
             priority=str(options.get("priority") or "interactive"),
             max_wait_seconds=options.get("max_wait_seconds"),
+            session_cap_usd=options.get("session_cap_usd"),
+            session_max_turns=options.get("session_max_turns"),
             admin=bool(options.get("admin")),
         )
         record = record_from_config(template, plaintext)
@@ -999,6 +1074,7 @@ class Gateway:
     #: is not an edit anybody should be able to make by typo.
     KEY_EDITABLE = (
         "models", "pool", "rpm", "spend_cap_usd", "priority", "max_wait_seconds",
+        "session_cap_usd", "session_max_turns",
     )
 
     async def update_key(self, name: str, **changes: Any) -> Dict[str, Any]:
@@ -1128,6 +1204,20 @@ class Gateway:
         self.keys = KeyRegistry(config.keys)
         self.keys.set_managed(managed)
         self.router = Router(config.routing.strategy, config.routing.weights)
+        # Reconfigured, not rebuilt: what the estimator has learned about each model
+        # and what the advisor has counted are observed state, and a reload must not
+        # send the pool back to leasing ceilings for twenty requests of every model.
+        # Managed keys are preserved a few lines above for the same reason.
+        self.estimator.reconfigure(
+            mode=config.routing.output_estimate,
+            quantile=config.routing.output_estimate_quantile,
+            min_samples=config.routing.output_estimate_min_samples,
+            window=config.routing.output_estimate_window,
+            floor=config.routing.output_estimate_floor,
+            max_undershoot=config.routing.output_estimate_max_undershoot,
+        )
+        self.cache_advisor.reconfigure(config.cache.advice_min_requests)
+        self.pacing.reconfigure(**_pacing_settings(config))
         self.gate.max_size = config.queue.max_size
         self.gate.default_max_wait = config.queue.default_max_wait_seconds
         self._file_pricing_table = config.pricing_table
@@ -1336,9 +1426,26 @@ class Gateway:
             else self.config.queue.default_max_wait_seconds,
         )
 
-        session = compute_session_key(body, headers)
+        requested_model = model
+        model, body = await self._downshift(model, body, key, priority)
+
+        # Diagnosis before dispatch: whether the caller asked for caching at all,
+        # and how much stable head a breakpoint would have covered. Booleans and
+        # token counts only — the body itself is never kept.
+        marked = has_cache_breakpoint(body)
+        prefix_tokens = cacheable_prefix_tokens(body)
+        if not marked and self.config.cache.auto_breakpoint:
+            body, inserted = insert_cache_breakpoint(body)
+            marked = inserted
+
+        session = compute_session_key(body, headers, scope=key.name)
+        await self._check_session_caps(key, session)
         owner = await self.store.get_affinity(session)
-        estimate = estimate_request(body, self.config.routing.estimate_safety_margin)
+        estimate = estimate_request(
+            body,
+            self.config.routing.estimate_safety_margin,
+            predictor=self.estimator.predict,
+        )
         request_id = "req_" + uuid.uuid4().hex[:20]
 
         event = RequestEvent(
@@ -1350,6 +1457,9 @@ class Gateway:
             streamed=streamed,
         )
         event.priority = priority_name(priority)
+        event.model_requested = requested_model if requested_model != model else ""
+        event.cache_breakpoint = marked
+        event.prefix_tokens = prefix_tokens
         return _Plan(
             body=body,
             headers=dict(headers),
@@ -1365,8 +1475,160 @@ class Gateway:
             max_wait=max_wait,
         )
 
+    async def _cached_pace(self) -> Optional[float]:
+        now = time.time()
+        if self._pace_cached_at + PACE_CACHE_SECONDS > now:
+            return self._pace_value
+        self._pace_value = await self._pace()
+        self._pace_cached_at = now
+        return self._pace_value
+
+    async def _ahead_of_pace(self) -> bool:
+        """True when enforcement should act. False whenever it cannot be sure."""
+        if not self.pacing.enforcing:
+            return False
+        pace = await self._cached_pace()
+        return pace is not None and pace > self.pacing.ahead_threshold
+
+    async def _downshift(
+        self, model: str, body: Dict[str, Any], key: KeyConfig, priority: int
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Substitute a cheaper model for batch work while ahead of pace.
+
+        The one lever here that changes *what the caller gets* rather than when or
+        where they get it, so it is off unless configured, batch-priority only, and
+        recorded on the request. It also refuses to substitute a model the key is
+        not allowed to use: a pacing policy must not widen what a tenant can reach.
+        """
+        downshift = self.config.pacing.model_downshift
+        if not downshift or priority < PRIORITY_BATCH:
+            return model, body
+        if not await self._ahead_of_pace():
+            return model, body
+        substituted = map_model(model, downshift)
+        if substituted == model or not key.supports_model(substituted):
+            return model, body
+        updated = dict(body)
+        updated["model"] = substituted
+        return substituted, updated
+
+    async def _apply_pacing(self, plan: _Plan) -> None:
+        """Hold a batch request back while the pool is ahead of its quota pace.
+
+        Deliberately a wait rather than a rejection. Waiting is what spends a window
+        more slowly; rejecting just moves the same work to whenever the client
+        retries, which is usually immediately.
+        """
+        if not self.pacing.enforcing or plan.priority < PRIORITY_BATCH:
+            return
+        if not await self._ahead_of_pace():
+            return
+
+        # Cheaper than waiting, so it is tried first: the Batches API is priced
+        # below standard and spends a different upstream limit, which is the whole
+        # reason being ahead of pace is worth acting on at all.
+        if self.config.pacing.prefer_batch_lane_when_ahead and self._may_spill(plan):
+            raise _SpillToBatch()
+
+        delay = self.pacing.delay_for(
+            plan.priority, PRIORITY_BATCH, await self._cached_pace()
+        )
+        budget = min(
+            delay,
+            max(0.0, plan.deadline - time.time()),
+            max(0.0, plan.max_wait - plan.queued_seconds),
+        )
+        if budget <= 0:
+            return
+        started = time.time()
+        try:
+            await asyncio.sleep(budget)
+        finally:
+            waited = time.time() - started
+            plan.queued_seconds += waited
+            plan.event.paced_for = round(waited, 3)
+
+    async def _check_session_caps(self, key: KeyConfig, session: str) -> None:
+        """Bound one conversation, where `spend_cap_usd` bounds the whole key.
+
+        A key cap catches a tenant overspending across everything they do. Nothing
+        caught a single agent loop doing it inside that allowance, and one loop
+        resending a large prefix a few hundred times can be the whole cap with one
+        key's name on it — visible only afterwards, in a chart.
+        """
+        if not self.config.sessions.track:
+            return
+        window = self.config.spend.window_seconds
+
+        if key.session_max_turns is not None:
+            turns = await self.store.get_spend(SCOPE_SESSION_TURNS, session, window)
+            if turns >= key.session_max_turns:
+                raise GatewayError(
+                    429,
+                    f"this conversation has run {int(turns)} turns, at the "
+                    f"{key.session_max_turns}-turn limit for key {key.name!r}. Start "
+                    "a new conversation, or raise session_max_turns",
+                    kind="rate_limit_error",
+                )
+
+        if key.session_cap_usd is not None:
+            spent = await self.store.get_spend(SCOPE_SESSION, session, window)
+            if spent >= key.session_cap_usd:
+                raise GatewayError(
+                    429,
+                    f"this conversation has spent ${spent:.2f} of its "
+                    f"${key.session_cap_usd:.2f} limit for key {key.name!r} in the "
+                    f"last {self.config.spend.window_hours:.0f}h",
+                    kind="rate_limit_error",
+                )
+
+    async def sessions_report(self) -> Dict[str, Any]:
+        """The most expensive conversations in the spend window, worst first.
+
+        Sessions are unbounded in number, so this reports the tail that matters
+        rather than all of them: what a runaway looks like is one session far above
+        every other, and that is visible in twenty rows.
+        """
+        settings = self.config.sessions
+        if not settings.track:
+            return {"tracking": False, "sessions": []}
+
+        window = self.config.spend.window_seconds
+        spend = await self.store.spend_by_scope(SCOPE_SESSION, window)
+        turns = await self.store.spend_by_scope(SCOPE_SESSION_TURNS, window)
+
+        rows: List[Dict[str, Any]] = []
+        for session in set(spend) | set(turns):
+            session_turns = int(turns.get(session, 0.0))
+            session_spend = float(spend.get(session, 0.0))
+            reasons = []
+            if settings.runaway_turns and session_turns >= settings.runaway_turns:
+                reasons.append(f"{session_turns} turns")
+            if (
+                settings.runaway_spend_usd
+                and session_spend >= settings.runaway_spend_usd
+            ):
+                reasons.append(f"${session_spend:.2f}")
+            rows.append({
+                "session_key": session,
+                "turns": session_turns,
+                "spend_usd": round(session_spend, 6),
+                "runaway": bool(reasons),
+                "why": ", ".join(reasons),
+            })
+
+        rows.sort(key=lambda row: (row["spend_usd"], row["turns"]), reverse=True)
+        return {
+            "tracking": True,
+            "window_seconds": window,
+            "runaway_turns": settings.runaway_turns,
+            "runaway_spend_usd": settings.runaway_spend_usd,
+            "sessions": rows[: max(1, settings.report_limit)],
+        }
+
     async def _acquire(self, plan: _Plan) -> Tuple[AccountRuntime, Decision]:
         """Route, or wait on the queue for capacity that is known to be coming."""
+        await self._apply_pacing(plan)
         while True:
             now = time.time()
             if now >= plan.deadline:
@@ -1746,6 +2008,18 @@ class Gateway:
     ) -> None:
         """Record a success: stats, affinity, spend, and the event."""
         now = time.time()
+        # What the model really returned, against what its lease reserved. The lease
+        # is the number that decided whether this account looked full.
+        self.estimator.observe(plan.model, plan.estimate.output_tokens, usage.output_tokens)
+        self.cache_advisor.observe(
+            plan.key.name,
+            plan.model,
+            plan.event.cache_breakpoint,
+            plan.event.prefix_tokens,
+            usage.input_tokens,
+            usage.cache_read_tokens,
+            usage.cache_creation_tokens,
+        )
         price = self.config.price_for(plan.model)
         cost = account.record_success(latency, usage, price, now, cost_multiplier)
 
@@ -1756,6 +2030,14 @@ class Gateway:
         if cost is not None:
             await self.store.add_spend(SCOPE_KEY, plan.key.name, cost)
             await self.store.add_spend(SCOPE_ACCOUNT, account.id, cost)
+
+        if self.config.sessions.track:
+            # A turn is recorded whether or not the model was priced: a runaway loop
+            # on an unpriced model is still a runaway loop, and a turn cap that only
+            # worked for priced models would fail exactly where the cost is unknown.
+            await self.store.add_spend(SCOPE_SESSION_TURNS, plan.session, 1.0)
+            if cost is not None:
+                await self.store.add_spend(SCOPE_SESSION, plan.session, cost)
 
         saved = None
         if price is not None and usage.cache_read_tokens:
@@ -1850,6 +2132,54 @@ class Gateway:
         raise last or GatewayError(502, "all accounts failed")
 
     # ---- introspection -------------------------------------------------------
+
+    async def pace_readings(self) -> List[PaceReading]:
+        """One reading per account that reports a window, plus the pool's budget.
+
+        An account that reports unified utilisation is paced on what it says about
+        itself. An API-key account says nothing about a week, so it can only be
+        paced against a budget the operator stated — and if none is stated it is
+        left out rather than guessed at.
+        """
+        now = time.time()
+        readings: List[PaceReading] = []
+        if not self.pacing.enabled:
+            return readings
+
+        for account in self.accounts.values():
+            window = account.mirror.unified.get(self.pacing.window)
+            if window is None or window.utilization is None:
+                continue
+            reading = self.pacing.from_unified(
+                account.id, window.utilization, window.seconds_to_reset(now), now
+            )
+            if reading is not None:
+                readings.append(reading)
+
+        if self.pacing.weekly_budget_usd:
+            since = max(1.0, now - _pacing_week_start(now))
+            spent = sum(
+                (await self.store.spend_by_scope(SCOPE_ACCOUNT, since)).values()
+            )
+            reading = self.pacing.from_budget("pool", spent, now)
+            if reading is not None:
+                readings.append(reading)
+        return readings
+
+    async def pacing_report(self) -> Dict[str, Any]:
+        return self.pacing.report(await self.pace_readings(), time.time())
+
+    async def _pace(self) -> Optional[float]:
+        """The tightest pace across every scope, or None when nothing is paced.
+
+        The tightest and not the mean: one account about to run dry on Wednesday is
+        the fact worth acting on, and averaging it against three healthy ones is how
+        that fact gets lost.
+        """
+        readings = await self.pace_readings()
+        if not readings:
+            return None
+        return max(reading.pace for reading in readings)
 
     def capacity_horizon(self, minutes: int = 60, buckets: int = 12) -> Dict[str, Any]:
         """Projected input-token capacity over the next hour.

@@ -6,6 +6,114 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- An **Efficiency** screen in the console, drawing all four of the new endpoints on
+  one page: quota pace, prompt-cache diagnosis, the most expensive conversations, and
+  what the output estimator has learned. Loaded on demand rather than on the five
+  second poll, because pacing and sessions both read the spend ledger.
+- `tokenbiryani status` prints a pace line per scope beneath the pool, and
+  `--json` carries the pacing report. It prints nothing when nothing is paced.
+- The request inspector shows the three new facts a request now carries: a model
+  substituted by pacing, time spent held back by it, and a missing `cache_control`
+  breakpoint on a prefix large enough to have been cached.
+
+### Changed
+- The benchmark's published figures move with adaptive output leases in place:
+  `sticky_headroom` reaches 79.6% cache hit at $0.4774, and cache-blind routing now
+  costs 2.00x rather than 1.94x. Reproduced by `python benchmarks/cache_affinity.py`.
+
+### Added
+- `pacing.prefer_batch_lane_when_ahead` (default `true`, needs `batch.enabled`) sends
+  batch-priority work to the Message Batches API while the pool is ahead of pace,
+  even though the pool has capacity for it. Batches are priced below standard and
+  spend a different upstream limit, so it beats waiting: the work still happens and
+  costs less. Tried before the pacing delay for that reason.
+- `pacing.model_downshift` substitutes a cheaper model for batch-priority work while
+  ahead of pace, with the same trailing-wildcard matching as `options.model_map`.
+  **Empty by default.** It is the only lever here that changes what the caller gets
+  rather than when or where they get it, so it is batch-only, refuses to substitute
+  into a model the key is not allowed to use, and records `model_requested` on the
+  request.
+- Per-conversation budgets. `keys[].session_cap_usd` and `keys[].session_max_turns`
+  bound one conversation inside a key's allowance, where `spend_cap_usd` bounds
+  everything the key does. Enforced across instances, because the counters ride the
+  existing spend ledger rather than a per-process dict.
+- `GET /admin/sessions` ranks conversations by cost in the spend window and flags the
+  ones past `sessions.runaway_turns` or `sessions.runaway_spend_usd`.
+- `sessions.track` (default `true`) records per-session cost and turn count — two
+  extra ledger rows per request, which is what the caps and the report are made of.
+  Turning it off makes both go quiet rather than report zeroes; the caps stop being
+  enforced with it, which is stated in the docs rather than left to be discovered.
+- Quota pacing. `GET /admin/pacing` answers a question nothing else here answered:
+  not "is there capacity now" but "should this be spent now". It reports, per scope,
+  how far through the quota window we are against how much of the quota is gone, and
+  says whether the pool is on course to run dry early or to reach the end of the week
+  with quota unused. Documented in `docs/pacing.md`.
+- `pacing.curve: business_hours` targets Monday–Friday 09:00–17:00 UTC instead of a
+  flat line, so a team that does not work weekends stops reading as behind pace every
+  Monday morning.
+- `pacing.mode: enforcing` holds **batch-priority requests only**, for a delay that
+  scales with how far ahead of pace the pool is. Interactive traffic is never
+  delayed. Reported as `paced_for` on the request.
+- `pacing.weekly_budget_usd` paces API-key accounts against spend since Monday
+  00:00 UTC. Subscriptions need nothing: they report their own `unified-5h` and
+  `unified-7d` utilisation. Without a stated budget, API-key accounts are simply not
+  paced rather than paced against an invented figure.
+- `GET /admin/cache-advice` separates the two reasons a cache hit rate is zero: a
+  client that never sent a `cache_control` breakpoint, which no routing change can
+  fix, and a breakpoint that is present while affinity keeps breaking, which is the
+  routing problem the rest of the gateway already diagnoses. Reported per virtual key
+  and model, with a verdict. Booleans and token counts only — no prompt content is
+  kept.
+- `cache.auto_breakpoint` (default `false`) adds the marker itself at the end of the
+  stable head, for callers that will not. Off by default and documented as the third
+  exception to routing rather than rewriting, after the two fields Bedrock and Vertex
+  need.
+- `routing.output_estimate: adaptive` (the new default) sizes the output half of a
+  lease from what each model has actually been returning, instead of the caller's
+  `max_tokens`. Bounded three ways: never above the caller's own ceiling, the ceiling
+  until 20 samples exist, and the ceiling again if the prediction is being outrun more
+  than `output_estimate_max_undershoot` of the time. `output_estimate: max_tokens`
+  restores the previous behaviour.
+- `GET /admin/estimation` reports what the estimator believes per model — sample
+  count, median, p95, undershoot rate, and whether it is predicting at all.
+- Session affinity keys are namespaced by the virtual key that presented the
+  request. `session_key()` takes a `scope`, and the gateway passes `key.name`.
+- `StateStore.clear_affinity_for_account()`, implemented on all three backends, so
+  deleting an account releases the sessions pinned to it.
+
+### Fixed
+- The routing inspector's "Affinity broke" notice used a `warn` class the stylesheet
+  never defined, so the one line explaining why a request cost more than it should
+  have rendered unstyled.
+- Two tenants could share one affinity entry. Session keys were global: either could
+  steer the other's routing by sending the same `X-TokenBiryani-Session` value, and
+  the `fp:` fingerprint collides whenever two callers run the same agent with the
+  same system prompt, tool names and opening messages — the normal case for one
+  popular client rather than a contrived one. **Existing affinity entries do not
+  survive this change**, so the first request of each live conversation after an
+  upgrade takes one cache miss.
+- Deleting an account left every session pinned to it naming a credential that no
+  longer existed. The router cannot match a missing owner, so it scored every
+  candidate at zero affinity and reported a cache break on each of those requests
+  for the rest of the affinity TTL — noise attributed to routing for something
+  routing did not do. `clear_override` deliberately does not release affinity: that
+  account survives, it only stops being overridden.
+- `docs/caching.md` said the router "scores affinity against real availability
+  rather than treating it as absolute". Under the default weights affinity is worth
+  0.40 and headroom at most 0.40, so no headroom advantage can move a conversation —
+  the eligibility filter moves it, not the score. The page now describes what the
+  code does, which is the stronger guarantee.
+- `README.md` and `docs/routing.md` recommended `headroom` for stateless batch
+  traffic. It is `sticky_headroom` with affinity switched off and nothing else
+  changed, so it scores identically whenever a request has no cache owner and can
+  never route better — only the same, or worse.
+- `docs/routing.md` now warns that `cost_tiered` normalises its cost term across the
+  eligible pool, which erases the size of a tier gap: 1.0 against 1.05 scores exactly
+  as far apart as 1.0 against 5.0. It will re-home an established conversation over a
+  5% tier difference, and a cache break costs far more than 5%.
+- `AccountConfig.cost_tier` now says in the code what it is: a routing weight that
+  never enters cost accounting. Reported spend and every spend cap come from the
+  model price table alone.
 - A release workflow. A `v*` tag is now the only thing that publishes: it refuses to
   run unless the tag, `pyproject.toml` and `__init__.py` name the same version and
   `CHANGELOG.md` has a dated section for it, then builds the wheel, creates the

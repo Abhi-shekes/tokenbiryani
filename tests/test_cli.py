@@ -377,3 +377,30 @@ def test_console_reports_a_gateway_that_is_not_running(tmp_path, monkeypatch, ca
     args = build_parser().parse_args(["-c", str(config), "console", "--no-browser"])
     assert cli.cmd_console(args) == 1
     assert "is the gateway running" in capsys.readouterr().err
+
+
+def test_status_shows_no_pace_line_when_nothing_is_paced():
+    """A pool of API keys with no stated budget has no pace, and a line reading '—'
+    would imply the gateway knows something about a week that it does not."""
+    from tokenbiryani.cli import render_pace
+
+    assert render_pace({"enabled": True, "readings": []}, color=False) == []
+    assert render_pace({}, color=False) == []
+
+
+def test_status_renders_a_pace_line_per_scope():
+    from tokenbiryani.cli import render_pace
+
+    lines = render_pace({
+        "enabled": True,
+        "readings": [
+            {"scope": "acct-01", "elapsed_fraction": 0.5, "utilization": 0.9,
+             "projected_utilization": 1.8, "pace": 0.4,
+             "verdict": "ahead of pace — at this rate the quota is gone in 13.0h"},
+        ],
+    }, color=False)
+    body = "\n".join(lines)
+    assert "PACE" in body
+    assert "acct-01" in body
+    assert "90%" in body
+    assert "ahead of pace" in body

@@ -44,7 +44,7 @@ session key, so selection is stable and reproducible under replay.
 | Strategy | Behaviour |
 |---|---|
 | `sticky_headroom` | **Default.** Affinity, then most headroom. |
-| `headroom` | Pure most-available. Correct for stateless batch traffic. |
+| `headroom` | `sticky_headroom` with affinity off. Identical to it whenever a request has no cache owner, so it never routes better — only the same, or worse. |
 | `cost_tiered` | Drain cheap accounts first, spill upward. |
 | `priority` | Strict ordered failover: primary, then backup. |
 | `least_loaded` | Baseline. |
@@ -52,6 +52,15 @@ session key, so selection is stable and reproducible under replay.
 
 The last three are cache-blind. Read [Why is my bill higher?](caching.md) before
 choosing one.
+
+`cost_tiered` deserves its own warning. Its cost term is normalised across the
+eligible pool, so the *size* of a tier gap is erased: accounts at 1.0 and 1.05 score
+exactly as far apart as accounts at 1.0 and 5.0. With cost weighted at 0.80 against
+affinity's 0.20 it will re-home an established conversation over a 5% tier
+difference, and a cache break costs far more than 5%. `sticky_headroom` already
+prefers the cheaper account when placing a *new* session, which is the part worth
+having — so set `cost_tier` and leave the strategy alone unless your tiers differ by
+more than the cache penalty.
 
 `tokenbiryani strategies` lists what your install actually has, including plugins.
 
@@ -64,6 +73,42 @@ So the estimated cost is **reserved before dispatch** and released on response, 
 reconciled against actual usage. Estimates are deliberately pessimistic
 (`routing.estimate_safety_margin`, default 1.15): reserving slightly too much is the
 safe direction.
+
+### Sizing the output half
+
+Input is approximated from the body. Output has no such handle before the request
+runs — only the caller's `max_tokens`, which is a ceiling and not a forecast. An
+agent client sends 32,000 and returns a few hundred tokens.
+
+Reserving the ceiling costs most of the pool's concurrency:
+
+| Output window | `max_tokens` | Concurrent requests admitted |
+|---|---|---|
+| 16,000 | 8,192 | 1 |
+| 64,000 | 32,000 | 2 |
+
+The lease is released afterwards, so no quota is *spent* on the difference — the cost
+is paid during the request. An account leased to its ceiling reads as full, an account
+that reads as full is filtered out of routing, and a conversation whose owner is
+filtered out gets re-homed onto a credential that has never seen its prefix. An
+estimation problem becomes a cache break, which is the expensive kind.
+
+So `routing.output_estimate: adaptive` (the default) keeps a rolling sample of what
+each model really returns and leases a high quantile of it. Three things bound it:
+
+- **Never above the caller's `max_tokens`.** It can only ever reserve less than the
+  old behaviour, never more.
+- **The ceiling until there is evidence** — `output_estimate_min_samples`, default 20.
+- **The ceiling again if it is being beaten**, past
+  `output_estimate_max_undershoot`. A p95 predictor is outrun about 5% of the time by
+  construction; this catches a distribution that has changed shape.
+
+`GET /admin/estimation` shows what it believes per model, including whether it is
+predicting at all. `routing.output_estimate: max_tokens` restores the old behaviour.
+
+Admission is unaffected. `max_tokens` larger than an account's entire output window
+still makes that account unable to serve the request — predicting sizes the lease, it
+does not overrule a bound the caller stated.
 
 ## Session affinity
 

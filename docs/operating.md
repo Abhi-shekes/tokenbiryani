@@ -32,6 +32,10 @@ tokenbiryani keygen          # a new virtual key
 | `GET /admin/accounts/{id}` | one account, with errors by class |
 | `GET /admin/requests/{id}` | **why that request went where it did** |
 | `GET /admin/horizon` | projected capacity for the next hour |
+| `GET /admin/pacing` | is this pool on course to spend its quota window — see [pacing](pacing.md) |
+| `GET /admin/cache-advice` | **why the cache hit rate is what it is** — whether the client ever sent a breakpoint |
+| `GET /admin/sessions` | the most expensive conversations in the window, runaways flagged |
+| `GET /admin/estimation` | what the output estimator has learned per model |
 | `GET /admin/events` | live SSE feed |
 | `POST /admin/keys`, `PATCH /admin/keys/{name}`, `DELETE /admin/keys/{name}` | mint, rescope and revoke |
 | `GET /admin/settings`, `POST /admin/settings` | read and change routing strategy and price table |

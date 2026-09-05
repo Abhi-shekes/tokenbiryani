@@ -62,6 +62,8 @@ def record_from_config(key: KeyConfig, plaintext: str) -> Dict[str, Any]:
         "spend_cap_usd": key.spend_cap_usd,
         "priority": key.priority,
         "max_wait_seconds": key.max_wait_seconds,
+        "session_cap_usd": key.session_cap_usd,
+        "session_max_turns": key.session_max_turns,
         "admin": key.admin,
         "created_at": time.time(),
     }
@@ -83,6 +85,11 @@ def _optional_number(value: Any) -> Optional[float]:
         return None
 
 
+def _optional_int(value: Any) -> Optional[int]:
+    number = _optional_number(value)
+    return None if number is None else int(number)
+
+
 def config_from_record(record: Mapping[str, Any]) -> KeyConfig:
     rpm = _optional_number(record.get("rpm"))
     return KeyConfig(
@@ -94,6 +101,8 @@ def config_from_record(record: Mapping[str, Any]) -> KeyConfig:
         spend_cap_usd=_optional_number(record.get("spend_cap_usd")),
         priority=str(record.get("priority") or "interactive"),
         max_wait_seconds=_optional_number(record.get("max_wait_seconds")),
+        session_cap_usd=_optional_number(record.get("session_cap_usd")),
+        session_max_turns=_optional_int(record.get("session_max_turns")),
         admin=bool(record.get("admin")),
     )
 
@@ -163,6 +172,8 @@ class KeyRegistry:
                     "pool": key.pool or "all",
                     "rpm": key.rpm,
                     "spend_cap_usd": key.spend_cap_usd,
+                    "session_cap_usd": key.session_cap_usd,
+                    "session_max_turns": key.session_max_turns,
                     "priority": key.priority,
                     "admin": key.admin,
                 }
@@ -178,6 +189,8 @@ class KeyRegistry:
                     "pool": key.pool or "all",
                     "rpm": key.rpm,
                     "spend_cap_usd": key.spend_cap_usd,
+                    "session_cap_usd": key.session_cap_usd,
+                    "session_max_turns": key.session_max_turns,
                     "priority": key.priority,
                     "admin": key.admin,
                     "created_at": record.get("created_at"),

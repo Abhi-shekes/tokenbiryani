@@ -78,7 +78,40 @@ def _pct(fraction: Optional[float]) -> str:
     return f"{fraction * 100:.0f}%"
 
 
-def render_status(snapshot: Dict[str, Any], color: bool = True) -> str:
+def render_pace(pacing: Dict[str, Any], color: bool = True) -> List[str]:
+    """One line per paced scope, or nothing at all.
+
+    Nothing at all is the common case and the right one: a pool of API keys with no
+    stated weekly budget has no pace, and a line reading "—" would imply the gateway
+    knows something about a week that it does not.
+    """
+    readings = (pacing or {}).get("readings") or []
+    if not readings:
+        return []
+    lines = ["", paint(
+        "  {:<10}{:>9}{:>9}{:>11}  {}".format(
+            "PACE", "ELAPSED", "USED", "PROJECTED", "VERDICT"
+        ), "dim", color)]
+    for reading in readings:
+        pace = reading.get("pace") or 0.0
+        tone = "disabled" if pace > 0.1 else "cache" if pace < -0.1 else "ready"
+        lines.append(
+            "  {:<10}{:>9}{:>9}{:>11}  {}".format(
+                reading.get("scope", "")[:10],
+                _pct(reading.get("elapsed_fraction")),
+                _pct(reading.get("utilization")),
+                _pct(reading.get("projected_utilization")),
+                paint(str(reading.get("verdict") or ""), tone, color),
+            )
+        )
+    return lines
+
+
+def render_status(
+    snapshot: Dict[str, Any],
+    color: bool = True,
+    pacing: Optional[Dict[str, Any]] = None,
+) -> str:
     pool = snapshot["pool"]
     stats = snapshot["stats"]
     lines: List[str] = []
@@ -142,6 +175,7 @@ def render_status(snapshot: Dict[str, Any], color: bool = True) -> str:
             paint("${:.2f}".format(stats["spend_usd"]), "bold", color),
         )
     )
+    lines.extend(render_pace(pacing or {}, color))
     return "\n".join(lines)
 
 
@@ -662,11 +696,29 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"gateway returned {response.status_code}", file=sys.stderr)
         return 1
     snapshot = response.json()
+
+    # A separate call because it reads the spend ledger, and /admin/status is what
+    # the console polls every five seconds. A gateway too old to have the endpoint,
+    # or one that fails it, simply reports no pace rather than failing `status`.
+    pacing: Dict[str, Any] = {}
+    try:
+        paced = httpx.get(
+            args.url.rstrip("/") + "/admin/pacing", headers=headers, timeout=5.0
+        )
+        if paced.status_code == 200:
+            pacing = paced.json()
+    except httpx.HTTPError:
+        pass
+
     if args.json:
-        print(json.dumps(snapshot, indent=2))
+        print(json.dumps(dict(snapshot, pacing=pacing), indent=2))
         return 0
     print()
-    print(render_status(snapshot, color=_colors_enabled(None if not args.no_color else False)))
+    print(render_status(
+        snapshot,
+        color=_colors_enabled(None if not args.no_color else False),
+        pacing=pacing,
+    ))
     print()
     return 0
 

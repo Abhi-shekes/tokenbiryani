@@ -50,6 +50,10 @@ class AccountConfig:
     #: so a bedrock or vertex account is not silently pointed at api.anthropic.com.
     base_url: str = ""
     priority: float = 0.0
+    #: A routing weight, not a price. `cost_tiered` drains low tiers first and
+    #: `sticky_headroom` prefers them on placement, but this number never enters
+    #: cost accounting: reported spend and every spend cap come from the model
+    #: price table alone. Set it to rank accounts, not to describe a rate.
     cost_tier: float = 1.0
     models: List[str] = field(default_factory=lambda: ["*"])
     max_concurrency: int = 16
@@ -93,6 +97,20 @@ class RoutingConfig:
     affinity_ttl_seconds: float = 1800.0
     #: multiplied into every token estimate before it becomes a lease
     estimate_safety_margin: float = 1.15
+
+    #: How the output half of a lease is sized. `adaptive` predicts from what each
+    #: model has actually been returning and is bounded by the caller's own
+    #: `max_tokens`, so it can only ever reserve less; `max_tokens` reserves the
+    #: ceiling, which is what this did before the estimator existed.
+    output_estimate: str = "adaptive"
+    output_estimate_quantile: float = 0.95
+    output_estimate_min_samples: int = 20
+    output_estimate_window: int = 200
+    output_estimate_floor: int = 256
+    #: Stop predicting for a model once this fraction of its recent completions have
+    #: outrun their lease. A p95 predictor is beaten ~5% of the time by design; this
+    #: catches a distribution that has changed shape.
+    output_estimate_max_undershoot: float = 0.20
 
 
 @dataclass
@@ -160,6 +178,11 @@ class KeyConfig:
     #: How long this key's requests will wait for capacity before being told to
     #: come back. Falls back to queue.default_max_wait_seconds.
     max_wait_seconds: Optional[float] = None
+    #: Per-conversation caps. `spend_cap_usd` above bounds the whole key; these
+    #: bound one conversation within it, which is what catches a runaway agent loop
+    #: before it spends the key's entire allowance on a single session.
+    session_cap_usd: Optional[float] = None
+    session_max_turns: Optional[int] = None
     #: Required to reach /admin/*. A tenant key must not be able to read the pool's
     #: account ids and spend, let alone mint more keys.
     admin: bool = False
@@ -228,6 +251,78 @@ class StoreConfig:
 
 
 @dataclass
+class SessionConfig:
+    """Per-conversation accounting, and what counts as a runaway."""
+
+    #: Record per-session cost and turn count on the spend ledger. Two extra ledger
+    #: rows per request, which is what per-session caps and the runaway report are
+    #: made of. Turn it off and both go quiet rather than lying.
+    track: bool = True
+    #: Thresholds the runaway report flags at. They enforce nothing on their own —
+    #: `keys[].session_cap_usd` and `session_max_turns` do that.
+    runaway_turns: int = 200
+    runaway_spend_usd: Optional[float] = None
+    #: How many sessions the report returns, worst first.
+    report_limit: int = 20
+
+
+@dataclass
+class PacingConfig:
+    """Spending a quota window on purpose rather than by accident.
+
+    Advisory by default: it reports, and changes nothing. `enforcing` throttles
+    `batch` priority only — interactive traffic is never delayed to protect a
+    budget, because an operator who wants that wants a spend cap, which already
+    exists and fails honestly instead of quietly adding latency.
+    """
+
+    enabled: bool = True
+    #: advisory | enforcing
+    mode: str = "advisory"
+    #: Which reported window to pace against, for accounts that report one: 5h | 7d
+    window: str = "7d"
+    #: linear | business_hours. A linear target expects a fifth of the quota spent
+    #: over a weekend, so a Monday-to-Friday team reads as behind pace every Monday.
+    curve: str = "linear"
+    ahead_threshold: float = 0.10
+    behind_threshold: float = 0.10
+    max_batch_delay_seconds: float = 30.0
+    #: Required for API-key accounts, which report no weekly window of any kind.
+    #: Without it they are simply not paced: inventing a weekly limit would be a
+    #: number nobody can attribute.
+    weekly_budget_usd: Optional[float] = None
+
+    #: When enforcing and ahead of pace, send batch-priority work to the Message
+    #: Batches API even though the pool has capacity for it now. Batches are priced
+    #: below standard and spend a different upstream limit, so this is the cheapest
+    #: lever available before anything has to be refused or delayed. Needs
+    #: `batch.enabled`; without it there is no lane to prefer and this does nothing.
+    prefer_batch_lane_when_ahead: bool = True
+
+    #: Model substitutions for batch-priority work while ahead of pace, as
+    #: {pattern: replacement} with the same trailing-wildcard matching as
+    #: `options.model_map`. **Empty by default.** Unlike every other lever here this
+    #: changes the answer the caller gets rather than when or where they get it, and
+    #: the model is part of the affinity fingerprint, so a conversation that
+    #: downshifts mid-flight also takes a cache break. Batch-priority only, never
+    #: interactive, and every substitution is recorded on the request.
+    model_downshift: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class CacheConfig:
+    """Prompt-cache diagnosis, and the one opt-in that acts on it."""
+
+    #: Rewrite the caller's body to add a `cache_control` breakpoint at the end of
+    #: the stable head when it carries none. Off by default: everywhere else this
+    #: gateway routes rather than rewrites, and turning this on makes it the third
+    #: exception to that after the two fields Bedrock and Vertex need.
+    auto_breakpoint: bool = False
+    #: Requests per (key, model) before the advisor will express an opinion.
+    advice_min_requests: int = 20
+
+
+@dataclass
 class SpendConfig:
     """Spend caps are windowed, not lifetime.
 
@@ -283,6 +378,9 @@ class Config:
     batch: BatchConfig = field(default_factory=BatchConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
     spend: SpendConfig = field(default_factory=SpendConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
+    pacing: PacingConfig = field(default_factory=PacingConfig)
+    sessions: SessionConfig = field(default_factory=SessionConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     oauth: OAuthConfig = field(default_factory=OAuthConfig)
     accounts: List[AccountConfig] = field(default_factory=list)
@@ -411,6 +509,9 @@ class Config:
             batch=build(BatchConfig, raw.get("batch")),
             store=build(StoreConfig, raw.get("store")),
             spend=build(SpendConfig, raw.get("spend")),
+            cache=build(CacheConfig, raw.get("cache")),
+            pacing=build(PacingConfig, raw.get("pacing")),
+            sessions=build(SessionConfig, raw.get("sessions")),
             observability=build(ObservabilityConfig, raw.get("observability")),
             oauth=build(OAuthConfig, raw.get("oauth")),
             accounts=accounts,

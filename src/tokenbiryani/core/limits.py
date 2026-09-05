@@ -14,7 +14,7 @@ import datetime as _dt
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 #: Rough bytes-per-token for JSON-serialised request bodies. Deliberately low
 #: (pessimistic: it over-counts tokens) so leases err toward reserving too much.
@@ -47,17 +47,33 @@ def parse_reset(value: Optional[str]) -> Optional[float]:
 class TokenEstimate:
     input_tokens: int
     output_tokens: int
+    #: The caller's own `max_tokens`. `output_tokens` is what gets leased and may be
+    #: a prediction well below it; this stays the true upper bound, and it is what
+    #: `exceeds_capacity` asks about. "Could this account ever serve the request"
+    #: has to be answered against what the caller is allowed to receive, not against
+    #: what we expect it to receive.
+    output_ceiling: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.output_ceiling:
+            self.output_ceiling = self.output_tokens
 
     @property
     def total(self) -> int:
         return self.input_tokens + self.output_tokens
 
 
-def estimate_request(body: Mapping[str, Any], safety_margin: float = 1.15) -> TokenEstimate:
+def estimate_request(
+    body: Mapping[str, Any],
+    safety_margin: float = 1.15,
+    predictor: Optional[Callable[[str, int], int]] = None,
+) -> TokenEstimate:
     """Estimate a request's cost without pulling in a tokenizer.
 
-    Input is approximated from the serialised body; output is the caller's own
-    ``max_tokens``, which is the only honest upper bound we have before the fact.
+    Input is approximated from the serialised body. Output defaults to the caller's
+    own ``max_tokens`` — the only honest upper bound available before the fact — and
+    a ``predictor`` may lower it to something the model has actually been returning.
+    It may only ever lower it: the ceiling is kept on the estimate either way.
     """
     try:
         serialised = json.dumps(
@@ -72,7 +88,18 @@ def estimate_request(body: Mapping[str, Any], safety_margin: float = 1.15) -> To
         max_tokens = int(raw_max) if raw_max is not None else DEFAULT_MAX_TOKENS
     except (TypeError, ValueError):
         max_tokens = DEFAULT_MAX_TOKENS
-    return TokenEstimate(input_tokens=max(1, approx_input), output_tokens=max(1, max_tokens))
+    ceiling = max(1, max_tokens)
+    leased = ceiling
+    if predictor is not None:
+        try:
+            leased = max(1, min(ceiling, int(predictor(str(body.get("model") or ""), ceiling))))
+        except Exception:  # noqa: BLE001 - a bad predictor must not fail a request
+            leased = ceiling
+    return TokenEstimate(
+        input_tokens=max(1, approx_input),
+        output_tokens=leased,
+        output_ceiling=ceiling,
+    )
 
 
 @dataclass
@@ -329,7 +356,7 @@ class LimitMirror:
         """True when no reset could ever make this account able to serve the request."""
         for window, need in (
             (self.input_tokens, estimate.input_tokens),
-            (self.output_tokens, estimate.output_tokens),
+            (self.output_tokens, estimate.output_ceiling),
         ):
             if window.limit is not None and need > window.limit:
                 return True

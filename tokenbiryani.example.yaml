@@ -18,6 +18,17 @@ routing:
   # Token estimates are multiplied by this before becoming a lease. Above 1.0 means
   # reserving slightly too much, which is the safe direction.
   estimate_safety_margin: 1.15
+  # How the output half of a lease is sized.
+  #   adaptive   — predict from what each model has actually been returning, bounded
+  #                by the caller's own max_tokens, so it can only ever reserve less
+  #   max_tokens — reserve the caller's ceiling, which an agent client sets far above
+  #                what it ever receives
+  output_estimate: adaptive
+  output_estimate_quantile: 0.95      # reserve for the tail, not the median
+  output_estimate_min_samples: 20     # below this, the ceiling is used
+  output_estimate_window: 200         # completions per model that take part
+  output_estimate_floor: 256          # never predict below this
+  output_estimate_max_undershoot: 0.20  # beaten more often than this, stop predicting
   weights:
     affinity: 0.40
     headroom: 0.40
@@ -25,6 +36,54 @@ routing:
     load: 0.15
     errors: 0.20
     cost: 0.10
+
+sessions:
+  # Per-conversation cost and turn accounting, on the same spend ledger. Two extra
+  # ledger rows per request — that is what the per-session caps below and the runaway
+  # report are made of. Off, and both go quiet rather than lying.
+  track: true
+  # What GET /admin/sessions flags. These report; they enforce nothing on their own —
+  # keys[].session_cap_usd and keys[].session_max_turns do that.
+  runaway_turns: 200
+  # runaway_spend_usd: 10
+  report_limit: 20
+
+pacing:
+  # Whether the pool is on course to spend its quota window, run dry early, or reach
+  # the end of the week with quota unused. Advisory reports and changes nothing.
+  enabled: true
+  mode: advisory            # advisory | enforcing
+  window: 7d                # 5h | 7d — for accounts that report a rolling window
+  curve: linear             # linear | business_hours (Mon-Fri 09:00-17:00 UTC)
+  ahead_threshold: 0.10
+  behind_threshold: 0.10
+  # Enforcing holds BATCH-priority requests only, scaled by how far ahead of pace the
+  # pool is. Interactive traffic is never delayed to protect a budget.
+  max_batch_delay_seconds: 30
+  # Required for API-key accounts: they report no weekly window of any kind, so
+  # without a stated budget they are simply not paced. Subscriptions report their own
+  # 5h and 7d utilisation and need nothing here.
+  # weekly_budget_usd: 400
+  # While ahead of pace, send batch work to the Batches API even though the pool has
+  # capacity: priced below standard and spends a different limit, so it beats
+  # waiting. Needs batch.enabled; without it there is no lane to prefer.
+  prefer_batch_lane_when_ahead: true
+  # Substitute a cheaper model for BATCH work while ahead of pace. Empty by default:
+  # every other lever here changes when or where a request runs, this one changes
+  # what the caller gets. Never applied to interactive traffic, never into a model
+  # the key is not allowed, and always recorded on the request.
+  # model_downshift:
+  #   claude-opus-*: claude-sonnet-5
+
+cache:
+  # Add a cache_control breakpoint to requests that carry none, at the end of the
+  # stable head. OFF by default and best left off: everywhere else this gateway
+  # routes rather than rewrites, and this makes it the third exception to that after
+  # the two fields Bedrock and Vertex need. Diagnosis (GET /admin/cache-advice) works
+  # either way and costs nothing.
+  auto_breakpoint: false
+  # Requests per (key, model) before the advisor will express an opinion.
+  advice_min_requests: 20
 
 retry:
   max_attempts: 3
@@ -170,6 +229,12 @@ keys:
     pool: []             # empty means every account
     rpm: null
     spend_cap_usd: null
+    # Per-conversation limits. spend_cap_usd above bounds everything this key does;
+    # these bound one conversation inside it, which is what catches a runaway agent
+    # loop before it spends the key's whole allowance on a single session. Both need
+    # sessions.track.
+    session_cap_usd: null
+    session_max_turns: null
     # Required to reach /admin/* — pool snapshot, request inspector, key management.
     # Issue tenant keys without it: /admin exposes account ids and spend.
     admin: false

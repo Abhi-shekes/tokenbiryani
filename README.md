@@ -64,12 +64,12 @@ prompt cache. Prices are illustrative ratios, not a price list.
 
 | Strategy | Cache hit | Cache breaks | Cost | vs sticky | Billed input |
 |---|---|---|---|---|---|
-| sticky_headroom | 78.6% | 0 | $0.4923 | — | 433,152 |
-| round_robin | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
-| least_loaded | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
-| headroom | 47.8% | 144 | $0.9535 | 1.94x | 433,152 |
+| sticky_headroom | 79.6% | 0 | $0.4774 | — | 433,152 |
+| round_robin | 47.8% | 144 | $0.9535 | 2.00x | 433,152 |
+| least_loaded | 47.8% | 144 | $0.9535 | 2.00x | 433,152 |
+| headroom | 47.8% | 144 | $0.9535 | 2.00x | 433,152 |
 
-**Cache-blind routing costs 1.94x here.** And note that round-robin, least-loaded and
+**Cache-blind routing costs 2.00x here.** And note that round-robin, least-loaded and
 most-headroom all pay exactly the same penalty: any strategy that ignores affinity
 visits every account once per conversation, so they all take the same number of cache
 misses. The penalty is inherent to cache-blindness, not a quirk of round-robin.
@@ -109,7 +109,7 @@ Set `routing.strategy`:
 | Strategy | Behaviour |
 |---|---|
 | `sticky_headroom` | **Default.** Affinity, then most headroom. |
-| `headroom` | Pure most-available. Correct for stateless batch traffic. |
+| `headroom` | `sticky_headroom` with affinity off, and nothing else changed. Identical to the default for traffic that has no cache owner, so it never routes better. |
 | `cost_tiered` | Drain cheap accounts first, spill upward. |
 | `priority` | Strict ordered failover: primary, then backup. |
 | `least_loaded` | Baseline. |
@@ -185,6 +185,10 @@ there:
   by account, model or virtual key, with a totals table. This history is persisted, so
   it survives a restart. See [docs/usage.md](docs/usage.md).
 - **Overview** — capacity horizon, live request feed, per-account meters.
+- **Efficiency** — the four questions the meters cannot answer: will the quota last
+  the week, is the prompt cache even switched on, is one conversation running away,
+  and is the pool reserving output it never uses. See
+  [docs/pacing.md](docs/pacing.md).
 - **Requests** — the routing inspector: why each request went where it did.
 - **Connect a client** — the exact export lines for this gateway's address.
 - **Keys** — mint and revoke virtual keys.
@@ -260,6 +264,10 @@ tokenbiryani status --json   # same data, for scripts
 | `POST /admin/reload` | re-read the config file |
 | `GET /admin/requests/{id}` | **why that request went where it did** — attempt chain, per-candidate scores, verdicts |
 | `GET /admin/horizon` | projected capacity for the next hour |
+| `GET /admin/estimation` | what the output estimator has learned, per model |
+| `GET /admin/pacing` | **is this pool on course to spend its week** — or run dry early, or strand quota |
+| `GET /admin/sessions` | the most expensive conversations in the window, runaways flagged |
+| `GET /admin/cache-advice` | **why the cache hit rate is what it is** — whether the client ever sent a breakpoint, per key and model |
 | `GET /admin/events` | live SSE feed |
 
 The request inspector is the point. `filtered — cooling, 27s remaining` is a complete
@@ -343,6 +351,13 @@ accounts:
 Per-key defaults for the last two live under `keys:` as `priority` and `max_wait_seconds`.
 
 ### Spend caps
+
+Caps come at two scopes. `keys[].spend_cap_usd` bounds everything a key does;
+`session_cap_usd` and `session_max_turns` bound one *conversation* inside that
+allowance. The second exists because the first cannot see a runaway: one agent loop
+resending a large prefix a few hundred times is a whole key's cap with that key's
+name on it, and until it trips there is nothing to look at. `GET /admin/sessions`
+ranks conversations by cost and flags the ones past `sessions.runaway_turns`.
 
 Caps are **windowed, not lifetime** (`spend.window_hours`, default 24). A lifetime cap on
 a persistent store would eventually wedge the gateway shut and stay that way.
