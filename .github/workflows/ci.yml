@@ -1,14 +1,44 @@
 name: ci
 
+# Every push to the trunk, every pull request, and — through `workflow_call` — every
+# tag, because release.yml runs this whole file before it publishes anything. There is
+# one definition of "green" and the release gate uses it rather than a second copy.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
+  workflow_call:
+
+# A force-push or a quick second commit supersedes the run before it. Without this the
+# queue fills with runs nobody will read, which on a free plan is the whole budget.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege by default. The jobs that need more ask for it themselves.
+permissions:
+  contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      # The type check targets 3.8 regardless of the runner, so once is enough. It is
+      # deliberately not strict: it exists to catch Optional handling that would crash
+      # at runtime, not to make anyone annotate every local.
+      - run: mypy
+
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -18,15 +48,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
       - run: pip install -e ".[dev]"
-      - run: ruff check .
-      # The type check targets 3.8 regardless of the runner, so once is enough.
-      - if: matrix.python-version == '3.12'
-        run: mypy
-      - run: pytest -q --cov=tokenbiryani --cov-report=term-missing --cov-fail-under=80
+      # The browser suites are excluded here and run in `ui`, once, against a pinned
+      # Chromium. They used to run in every matrix entry against whatever Chrome the
+      # runner happened to ship, which made a real timeout look like a 3.8 problem.
+      - run: |
+          pytest -q \
+            --ignore=tests/test_console_ui.py \
+            --ignore=tests/test_onboarding_ui.py \
+            --cov=tokenbiryani --cov-report=term-missing --cov-fail-under=80
 
   redis:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       redis:
         image: redis:7
@@ -39,6 +74,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - run: pip install -e ".[dev]"
       # The suite covers the Redis backend with fakeredis; this job runs the same
       # store against a real server, where inclusive/exclusive range semantics bite.
@@ -48,43 +84,102 @@ jobs:
 
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - run: pip install -e ".[dev]"
       - run: bash scripts/smoke.sh
 
   ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - run: pip install -e ".[dev]"
       - run: python -m playwright install --with-deps chromium
       # Drives the real console in a real browser. The static assertions in
       # tests/test_console.py cannot catch a panel that renders empty.
-      - run: pytest -q tests/test_console_ui.py
+      - run: pytest -q tests/test_console_ui.py tests/test_onboarding_ui.py
         env:
           TOKENBIRYANI_UI_BROWSER: chromium
 
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - run: pip install -e ".[docs]"
       # --strict turns a broken internal link into a failure, which is the only way
       # docs links stay correct.
       - run: mkdocs build --strict
 
+  changelog:
+    # Pull requests only. A tag has nothing to compare against, and a direct push to
+    # main is the maintainer's own call.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: The change is described in CHANGELOG.md
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE"
+          if git diff --name-only "origin/$BASE...HEAD" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md updated."
+            exit 0
+          fi
+          echo "::error file=CHANGELOG.md::This pull request changes nothing in \
+          CHANGELOG.md. Add a line under '## [Unreleased]' describing what changed \
+          for someone upgrading — or apply the 'no-changelog' label if it genuinely \
+          changes nothing a user would notice (a test, a refactor, a typo)."
+          exit 1
+
+  package:
+    # A wheel that does not build, or that quietly starts shipping the test doubles
+    # again, is only discovered at release time otherwise — which is the worst moment.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - name: The wheel carries the package and nothing else
+        run: |
+          wheel=$(ls dist/*.whl)
+          python - "$wheel" <<'PY'
+          import sys, zipfile
+          names = zipfile.ZipFile(sys.argv[1]).namelist()
+          assert any(n.endswith("prices.yaml") for n in names), "prices.yaml missing"
+          assert any(n.endswith("console.html") for n in names), "console.html missing"
+          leaked = [n for n in names if "/testing/" in n or n.startswith("tests/")]
+          assert not leaked, f"test scaffolding in the wheel: {leaked}"
+          print("wheel contents look right")
+          PY
+
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -134,69 +229,32 @@ jobs:
           context: .
           target: dev
           load: true
-          tags: tokenbiryani:ci-dev
+          tags: tokenbiryani:dev
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: The whole stack comes up from one file
+      - name: The whole stack comes up, empty, and takes its first account
         run: |
-          docker compose up -d --wait
-          curl -sf http://127.0.0.1:8787/healthz | grep -q '"ready": *3'
+          # No --wait on the gateway: the stack ships with an empty pool on purpose,
+          # /healthz answers 503 until an account exists, and the container is
+          # therefore "unhealthy" by design until someone adds one. That first-run
+          # state is exactly what this asserts, and then it adds the account.
+          KEY=bir_dev_only_change_me_0123456789
+          docker compose up -d
+          for _ in $(seq 60); do
+            curl -s -o /dev/null http://127.0.0.1:8787/console && break || sleep 1
+          done
+          curl -s http://127.0.0.1:8787/healthz | grep -q '"status": *"no_capacity"'
           curl -sf http://127.0.0.1:8787/console.css > /dev/null
+          curl -sf -X POST http://127.0.0.1:8787/admin/accounts \
+            -H "x-api-key: $KEY" -H "content-type: application/json" \
+            -d '{"id":"compose-first","name":"First account","api_key":"sk-ant-unused"}' \
+            | grep -q '"name": *"First account"'
+          # The account is encrypted into Redis by the console's own path, so this
+          # also proves the compose stack can reach and write to its store.
+          curl -sf http://127.0.0.1:8787/healthz | grep -q '"ready": *1'
+          if docker compose logs gateway | grep -qi traceback; then
+            echo "::error::the gateway logged a traceback while coming up"
+            docker compose logs gateway
+            exit 1
+          fi
           docker compose down -v
-
-  publish-docs:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [docs]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[docs]"
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          mkdocs gh-deploy --force
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, redis, smoke, docker, docs]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      id-token: write        # PyPI trusted publishing
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install build
-      - run: python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
-
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}

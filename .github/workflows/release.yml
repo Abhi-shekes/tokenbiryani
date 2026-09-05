@@ -1,0 +1,186 @@
+name: release
+
+# A tag is the only thing that releases. Nothing here runs from a branch, a button or
+# a schedule, so "what is in 0.2.0" always has one answer: whatever v0.2.0 points at.
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # The tag has to agree with the tree it points at before anything is built. All
+  # three of these have been wrong in real projects: a tag one commit early, a
+  # version bump nobody made, and a release whose notes describe the version before.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install packaging
+      # PEP 440 decides what a pre-release is, rather than a substring match that
+      # calls v1.0.0-alpha and v1.0.0 the same thing because both contain an "a".
+      - id: version
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          from packaging.version import InvalidVersion, Version
+
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          try:
+              parsed = Version(tag)
+          except InvalidVersion:
+              raise SystemExit(f"::error::{tag!r} is not a PEP 440 version")
+          print(f"version={tag}")
+          print(f"prerelease={str(parsed.is_prerelease).lower()}")
+          PY
+      - name: The tag, pyproject.toml and __init__.py say the same version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pyproject=$(python -c "import re,pathlib;print(re.search(r'^version = \"([^\"]+)\"', pathlib.Path('pyproject.toml').read_text(), re.M).group(1))")
+          dunder=$(python -c "import re,pathlib;print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/tokenbiryani/__init__.py').read_text()).group(1))")
+          echo "tag=$tag pyproject=$pyproject __init__=$dunder"
+          if [ "$tag" != "$pyproject" ] || [ "$tag" != "$dunder" ]; then
+            echo "::error::the tag and the tree disagree about the version. Bump both files, commit, then move the tag."
+            exit 1
+          fi
+      - name: The changelog describes it
+        run: python scripts/changelog.py check "$GITHUB_REF_NAME"
+
+  # The full suite, from ci.yml rather than a second copy of it. A release that skips
+  # the tests is the only kind of release worth refusing outright.
+  verify:
+    needs: [guard]
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  github-release:
+    needs: [guard, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # create the release and upload the artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      # The notes are quoted from CHANGELOG.md, never retyped — see scripts/changelog.py.
+      - name: Release notes, from the changelog
+        run: |
+          {
+            python scripts/changelog.py extract "$GITHUB_REF_NAME"
+            echo
+            echo "---"
+            echo
+            echo '```bash'
+            echo "pip install tokenbiryani==${{ needs.guard.outputs.version }}"
+            echo "docker pull ghcr.io/${{ github.repository }}:${{ needs.guard.outputs.version }}"
+            echo '```'
+          } > notes.md
+      # `gh` ships on the runner and authenticates with the job's own token, so the
+      # release is created without trusting a third-party action with contents:write.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        run: |
+          flags=""
+          [ "$PRERELEASE" = "true" ] && flags="--prerelease"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "tokenbiryani ${{ needs.guard.outputs.version }}" \
+            --notes-file notes.md \
+            $flags \
+            dist/*.whl dist/*.tar.gz
+
+  pypi:
+    needs: [guard, verify]
+    # Off until a PyPI trusted publisher exists for this repository. Set the
+    # repository variable PYPI_PUBLISH to "true" once it does:
+    #
+    #   gh variable set PYPI_PUBLISH --body true
+    #
+    # Gated rather than deleted because the alternative — an unconditional publish
+    # step — turns every tag into a failed release until the day PyPI is configured,
+    # and a red release is one nobody reads the notes of.
+    if: vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write        # trusted publishing; there is no API token to leak
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  ghcr:
+    needs: [guard, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ needs.guard.outputs.prerelease == 'false' }}
+      # The default target: wheel only, no source, no test dependencies.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  docs:
+    needs: [guard, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # pushes the built site to gh-pages
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[docs]"
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdocs gh-deploy --force

@@ -12,6 +12,8 @@
 - [ ] `mypy`
 - [ ] `pytest`
 - [ ] Tests cover the behaviour, not the implementation detail
+- [ ] `CHANGELOG.md` has a line under `## [Unreleased]` — or the `no-changelog`
+      label, because this changes nothing a user would notice
 
 ## House rules this touches
 
