@@ -8,7 +8,10 @@ of its quota unused are both failures. Neither shows up in a headroom meter, bec
 headroom is full again after every reset — right up until the window it belongs to
 runs out.
 
-`GET /admin/pacing` answers the second question.
+`GET /admin/pacing` answers the second question, and the console's **Efficiency**
+screen draws it: each scope's spending against a mark showing where it should be by
+now, so the gap between them is the pace. `tokenbiryani status` prints the same
+readings under the pool, and prints nothing at all when nothing is paced.
 
 ## Two signals, not interchangeable
 

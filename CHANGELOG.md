@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- An **Efficiency** screen in the console, drawing all four of the new endpoints on
+  one page: quota pace, prompt-cache diagnosis, the most expensive conversations, and
+  what the output estimator has learned. Loaded on demand rather than on the five
+  second poll, because pacing and sessions both read the spend ledger.
+- `tokenbiryani status` prints a pace line per scope beneath the pool, and
+  `--json` carries the pacing report. It prints nothing when nothing is paced.
+
 ### Changed
 - The benchmark's published figures move with adaptive output leases in place:
   `sticky_headroom` reaches 79.6% cache hit at $0.4774, and cache-blind routing now

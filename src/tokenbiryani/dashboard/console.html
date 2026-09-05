@@ -168,6 +168,10 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
           stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
         Requests</button>
+      <button data-tab="efficiency">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+        Efficiency</button>
 
       <div class="sep">Manage</div>
       <button data-tab="accounts">
@@ -259,6 +263,15 @@ export ANTHROPIC_AUTH_TOKEN=<b>&lt;your key&gt;</b></pre>
         <span class="note" id="u-note"></span>
       </div>
       <div class="stack" id="u-body"></div>
+    </section>
+
+    <!-- ---- Efficiency ----
+         The four questions the meters cannot answer: will the quota last the week,
+         is the cache even switched on, is one conversation running away, and is the
+         pool reserving output it never uses. Loaded on demand rather than on the 5s
+         poll — pacing and sessions both read the spend ledger. -->
+    <section class="view hidden" data-panel="efficiency">
+      <div class="stack" id="eff-body"></div>
     </section>
 
     <!-- ---- Requests ---- -->
@@ -370,6 +383,7 @@ const TITLES = {
   pool: ["Overview", "can I make a request right now — and if not, when?"],
   usage: ["Usage", "what the pool has actually spent, and on what"],
   requests: ["Requests", "every request, and the routing decision behind it"],
+  efficiency: ["Efficiency", "is this quota being spent well, and will it last the week?"],
   accounts: ["Accounts", "add, name, test and rotate the credentials in the pool"],
   keys: ["Keys", "virtual keys your clients authenticate with"],
   guide: ["Connect a client", "point Claude Code or the SDK at this gateway"],
@@ -1212,6 +1226,187 @@ function renderUsage() {
 }
 
 // ---- requests ----------------------------------------------------------------
+// ---- efficiency ---------------------------------------------------------------
+// Four questions the pool meters cannot answer, on one screen: will the quota last
+// the week, is the prompt cache even switched on, is one conversation running away,
+// and is the pool reserving output it never uses.
+
+/** Seconds as something a person reads at a glance. */
+const spanOf = (seconds) => {
+  if (seconds == null) return "—";
+  if (seconds < 3600) return Math.round(seconds / 60) + "m";
+  if (seconds < 86400) return (seconds / 3600).toFixed(1) + "h";
+  return (seconds / 86400).toFixed(1) + "d";
+};
+
+/** Target against actual on one track. The gap between them *is* the pace, so
+ *  drawing them apart would make the reader do the subtraction the bar exists to
+ *  do for them. */
+function paceBar(reading) {
+  const used = Math.max(0, Math.min(1, reading.utilization));
+  const target = Math.max(0, Math.min(1, reading.target));
+  const kind = reading.pace > 0.1 ? "crit" : reading.pace < -0.1 ? "cool" : "ready";
+  return `<span class="bar" title="target ${pct(target)}, actual ${pct(used)}">
+    <span class="k">${esc(reading.scope)}</span>
+    <span class="track">
+      <i style="width:${Math.max(2, Math.round(used * 100))}%;background:var(--${kind})"></i>
+      <b style="left:${Math.round(target * 100)}%;width:2px;background:var(--text-2)"></b>
+    </span>
+    <span class="v">${pct(used)}</span></span>`;
+}
+
+function pacingCard(pacing) {
+  if (!pacing.enabled) {
+    return `<div class="card"><header><h3>Quota pace</h3></header>
+      <div class="empty"><b>Pacing is off</b>
+      Set <span class="mono">pacing.enabled: true</span> to see whether this pool is
+      on course to spend its window.</div></div>`;
+  }
+  if (!pacing.readings.length) {
+    return `<div class="card"><header><h3>Quota pace</h3>
+      <span class="note">${esc(pacing.mode)}</span></header>
+      <div class="empty"><b>Nothing to pace against</b>
+      A subscription reports its own 5h and 7d windows and is paced automatically.
+      An API key reports no weekly window at all, so it needs
+      <span class="mono">pacing.weekly_budget_usd</span> — without one it is left out
+      rather than paced against an invented figure.</div></div>`;
+  }
+  const rows = pacing.readings.map((reading) => `<tr>
+    <td class="mono">${esc(reading.scope)}</td>
+    <td>${esc(reading.source)}</td>
+    <td class="r">${pct(reading.elapsed_fraction)}</td>
+    <td class="r">${pct(reading.utilization)}</td>
+    <td class="r">${pct(reading.projected_utilization)}</td>
+    <td class="r">${reading.exhausted_in_seconds == null
+      ? "—" : spanOf(reading.exhausted_in_seconds)}</td>
+    <td>${esc(reading.verdict)}</td></tr>`).join("");
+
+  return `<div class="card"><header><h3>Quota pace</h3>
+    <span class="note">${esc(pacing.mode)} · ${esc(pacing.curve)} curve${
+      pacing.mode === "enforcing"
+        ? " · batch work is being held back; interactive never is" : ""}</span></header>
+    <div class="pad"><span class="meter pace">${
+      pacing.readings.map(paceBar).join("")}</span>
+      <div class="note">The mark on each track is where spending should be by now.
+        Bar past the mark means it runs dry early; short of it means quota goes
+        unused.</div></div>
+    <div class="scroll pad"><table><thead><tr>
+      <th>Scope</th><th>Source</th><th class="r">Window gone</th>
+      <th class="r">Quota used</th><th class="r">Projected</th><th class="r">Dry in</th>
+      <th>Verdict</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function cacheAdviceCard(advice) {
+  if (!advice.findings.length) {
+    return `<div class="card"><header><h3>Prompt cache</h3></header>
+      <div class="empty"><b>Not enough traffic yet</b>
+      Needs ${num(advice.min_requests)} requests from one key and model before it will
+      say anything.</div></div>`;
+  }
+  const rows = advice.findings.map((f) => {
+    const bad = f.breakpoint_rate < 0.5 || f.cache_hit_rate < 0.2;
+    return `<tr>
+      <td class="mono">${esc(f.key)}</td>
+      <td class="mono">${esc(f.model)}</td>
+      <td class="r">${num(f.requests)}</td>
+      <td class="r">${pct(f.breakpoint_rate)}</td>
+      <td class="r">${tokens(f.mean_prefix_tokens)}</td>
+      <td class="r">${pct(f.cache_hit_rate)}</td>
+      <td class="${bad ? "warn" : ""}">${esc(f.verdict)}</td></tr>`;
+  }).join("");
+
+  return `<div class="card"><header><h3>Prompt cache</h3>
+    <span class="note">a hit rate of zero has two causes and only one is routing</span>
+    </header>
+    <div class="scroll pad"><table><thead><tr>
+      <th>Key</th><th>Model</th><th class="r">Requests</th><th class="r">Marked</th>
+      <th class="r">Prefix</th><th class="r">Hit rate</th><th>Verdict</th>
+      </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function sessionsCard(report) {
+  if (!report.tracking) {
+    return `<div class="card"><header><h3>Conversations</h3></header>
+      <div class="empty"><b>Session tracking is off</b>
+      <span class="mono">sessions.track: false</span>, so per-conversation cost and
+      turn counts are not recorded — and the per-key session caps that read them are
+      not enforced either.</div></div>`;
+  }
+  if (!report.sessions.length) {
+    return `<div class="card"><header><h3>Conversations</h3></header>
+      <div class="empty"><b>No conversations in this window</b>
+      They appear here once requests have been served.</div></div>`;
+  }
+  const rows = report.sessions.map((row) => `<tr>
+    <td class="mono">${esc(row.session_key)}</td>
+    <td class="r">${num(row.turns)}</td>
+    <td class="r">${usd(row.spend_usd)}</td>
+    <td class="${row.runaway ? "warn" : ""}">${
+      row.runaway ? "runaway — " + esc(row.why) : ""}</td></tr>`).join("");
+
+  return `<div class="card"><header><h3>Conversations</h3>
+    <span class="note">most expensive first · flagged past
+      ${num(report.runaway_turns)} turns${report.runaway_spend_usd
+        ? " or " + usd(report.runaway_spend_usd) : ""}</span></header>
+    <div class="scroll pad"><table><thead><tr>
+      <th>Session</th><th class="r">Turns</th><th class="r">Spend</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function estimationCard(estimation) {
+  const models = Object.entries(estimation.models || {});
+  if (estimation.mode !== "adaptive") {
+    return `<div class="card"><header><h3>Output leases</h3></header>
+      <div class="empty"><b>Leasing the caller's ceiling</b>
+      <span class="mono">routing.output_estimate: max_tokens</span>. An agent client
+      asking for 32k and returning a few hundred tokens holds 32k of the account's
+      output window for the life of every request.</div></div>`;
+  }
+  if (!models.length) {
+    return `<div class="card"><header><h3>Output leases</h3></header>
+      <div class="empty"><b>No completions observed yet</b>
+      Until ${num(estimation.min_samples)} land for a model, its lease is the
+      caller's <span class="mono">max_tokens</span>.</div></div>`;
+  }
+  const rows = models.map(([model, m]) => `<tr>
+    <td class="mono">${esc(model)}</td>
+    <td class="r">${num(m.samples)}</td>
+    <td class="r">${num(m.median)}</td>
+    <td class="r">${num(m.p95)}</td>
+    <td class="r">${num(m.max)}</td>
+    <td class="r">${pct(m.undershoot_rate)}</td>
+    <td>${m.predicting
+      ? "predicting"
+      : `<span class="warn">leasing the ceiling</span>`}</td></tr>`).join("");
+
+  return `<div class="card"><header><h3>Output leases</h3>
+    <span class="note">what each model really returns, against what callers ask
+      for</span></header>
+    <div class="scroll pad"><table><thead><tr>
+      <th>Model</th><th class="r">Samples</th><th class="r">Median</th>
+      <th class="r">p95</th><th class="r">Max</th><th class="r">Outrun</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="pad note">A model reading <b>leasing the ceiling</b> is either still
+      gathering samples or has been outrun too often, and is reserving the caller's
+      full <span class="mono">max_tokens</span> until that ages out.</div></div>`;
+}
+
+async function loadEfficiency() {
+  const body = el("eff-body");
+  body.innerHTML = `<div class="card"><div class="empty">Loading…</div></div>`;
+  try {
+    const [pacing, advice, sessions, estimation] = await Promise.all([
+      api("/admin/pacing"), api("/admin/cache-advice"),
+      api("/admin/sessions"), api("/admin/estimation"),
+    ]);
+    body.innerHTML = pacingCard(pacing) + cacheAdviceCard(advice)
+      + sessionsCard(sessions) + estimationCard(estimation);
+  } catch (error) {
+    if (error.offline) { goOffline(); return; }
+    if (error.message !== "unauthorized") banner(error.message);
+  }
+}
+
 function requestRow(request) {
   const status = request.status == null ? "—" : request.status;
   const cls = request.error ? "er" : request.affinity_broken ? "ca" : "ok";
@@ -2877,6 +3072,8 @@ function show(name) {
   if (name === "settings") loadEditableSettings();
   // Fetched on demand, not on the 5s poll: a 30-day window is a real query.
   if (name === "usage") loadUsage();
+  // Same reasoning: pacing and sessions both read the spend ledger.
+  if (name === "efficiency") loadEfficiency();
 }
 
 /**

@@ -756,3 +756,39 @@ def test_a_subscription_shows_rolling_windows_rather_than_empty_meters(page, liv
     assert meters["reset"] == 3600, "the countdown follows the window that binds"
     assert "no limits" not in meters["pill"]
     assert "rolling" in meters["pill"]
+
+
+def efficiency(page):
+    """Open the tab and wait for real content.
+
+    The loading placeholder is itself a `.card`, so waiting on `.card` alone
+    matches it immediately and reads an empty screen as a rendered one. Every card
+    that has actually rendered carries a header.
+    """
+    page.click(".nav button[data-tab='efficiency']")
+    page.wait_for_selector("#eff-body .card header h3", timeout=15000)
+    return page.inner_text("#eff-body")
+
+
+def test_the_efficiency_tab_renders_all_four_cards(page):
+    """The four questions the pool meters cannot answer, on one screen."""
+    text = efficiency(page)
+    for heading in ("Quota pace", "Prompt cache", "Conversations", "Output leases"):
+        assert heading in text, f"{heading} card is missing"
+
+
+def test_an_unpaced_pool_says_why_rather_than_drawing_nothing(page):
+    """API keys report no weekly window, and this fixture states no budget. An empty
+    card would read as a fault; the reason is the useful thing to show."""
+    assert "Nothing to pace against" in efficiency(page)
+
+
+def test_conversations_are_listed_worst_first(page):
+    text = efficiency(page)
+    assert "Session tracking is off" not in text
+    assert "fp:" in text, "session keys should be listed"
+
+
+def test_the_efficiency_tab_raises_no_page_errors(page):
+    efficiency(page)
+    assert page.errors == [], page.errors

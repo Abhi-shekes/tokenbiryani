@@ -185,6 +185,10 @@ there:
   by account, model or virtual key, with a totals table. This history is persisted, so
   it survives a restart. See [docs/usage.md](docs/usage.md).
 - **Overview** — capacity horizon, live request feed, per-account meters.
+- **Efficiency** — the four questions the meters cannot answer: will the quota last
+  the week, is the prompt cache even switched on, is one conversation running away,
+  and is the pool reserving output it never uses. See
+  [docs/pacing.md](docs/pacing.md).
 - **Requests** — the routing inspector: why each request went where it did.
 - **Connect a client** — the exact export lines for this gateway's address.
 - **Keys** — mint and revoke virtual keys.
