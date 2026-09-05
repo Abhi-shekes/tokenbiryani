@@ -560,9 +560,9 @@ class Gateway:
     async def refresh_oauth_sessions(self) -> None:
         """Renew subscription tokens before they expire.
 
-        `contrib/tokenbiryani-oauth` deliberately does not do this — it re-reads the
-        file the Claude CLI refreshes. A gateway holding several sessions has no CLI
-        to lean on, so it has to renew them itself.
+        Reading a file the Claude CLI keeps fresh covers a single session and nothing
+        else. A gateway holding several has no CLI to lean on, so it renews them
+        itself.
         """
         settings = self.config.oauth
         now = time.time()

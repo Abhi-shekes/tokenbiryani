@@ -1,7 +1,7 @@
 # Biryani Console — UI design
 
 Companion to the
-[project plan](https://github.com/OWNER/tokenbiryani/blob/main/PLAN.md). Covers the operator console (M5), the CLI surface,
+project plan in `PLAN.md`. Covers the operator console, the CLI surface,
 and the visual system shared across both.
 
 ---
@@ -103,6 +103,62 @@ Neutrals carry a slight blue bias so saffron reads as a deliberate warm accent.
 
 **Dark-first.** Operators run this beside a terminal. Light is fully supported and gets
 equal contrast care, but dark is the design's home.
+
+### The series palette, and why it had to be separate
+
+The four state colours above are **reserved**. `ready`, `cooling` and `critical` mean
+health; `cache` means the cache. None of them may stand in for "account number 4" — a
+green bar in a stacked chart would be read as a healthy account rather than as an
+identity, which is the same mistake as colouring a bar by its own length.
+
+So the Usage screen's charts draw from their own categorical ramp, eight fixed slots,
+assigned in order and never cycled:
+
+| Slot | Hue | Light | Dark |
+|---|---|---|---|
+| 1 | blue | `#2a78d6` | `#3987e5` |
+| 2 | orange | `#eb6834` | `#d95926` |
+| 3 | aqua | `#1baf7a` | `#199e70` |
+| 4 | yellow | `#eda100` | `#c98500` |
+| 5 | magenta | `#e87ba4` | `#d55181` |
+| 6 | green | `#008300` | `#008300` |
+| 7 | violet | `#4a3aa7` | `#9085e9` |
+| 8 | red | `#e34948` | `#e66767` |
+
+Validated against **this console's own surfaces** — `#111419` dark, `#FFFFFF` light —
+not a generic white and black. Both modes pass the lightness band, the chroma floor,
+the adjacent-pair CVD separation and the normal-vision floor; worst adjacent pair on
+dark is ΔE 8.4 protan, 19.3 unsimulated.
+
+Three light-mode slots sit under 3:1 against white. That is a **relief obligation**,
+not a warning to dismiss: every chart on the Usage screen ships a totals table beside
+it, so every value the charts encode as colour is also readable as a number. The table
+is the accessibility mechanism, not decoration.
+
+Two rules follow, and both are load-bearing:
+
+- **Colour follows the entity, never its rank.** Slots are assigned on first sight and
+  kept for the session. The API returns groups largest-first, so painting by array
+  index would repaint every survivor the moment a range change reorders them — and a
+  reader who learned "acct-02 is orange" would be misled.
+- **Past eight, fold into one neutral "Other".** A ninth generated hue is
+  indistinguishable from an existing slot under colour-vision deficiency.
+
+Do not re-step these by eye. Re-run the validator.
+
+### The mark
+
+A sealed, layered pot: dum biryani, and a pool of accounts, in one shape. Drawn in
+strokes on a 32 viewBox, the vessel in `currentColor` so it sits on any surface, the
+lid and the layers in the accent.
+
+It was chosen against two alternatives — converging lanes, and stacked headroom bars —
+by rendering all three at 96, 48, 32 and 16px in both themes. The lanes read as a
+generic merge arrow and the bars as a sort icon; more importantly, **only this one
+survives 16px**, which is the size that matters most because it is the favicon. The
+emoji it replaced did not survive it either.
+
+One silhouette everywhere: browser tab, sidebar, landing page, onboarding.
 
 ### Type
 

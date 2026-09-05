@@ -323,7 +323,7 @@ def test_an_oauth_upstream_sends_a_bearer_token_and_strips_x_api_key():
     assert "foo" in headers["anthropic-beta"]
 
 
-# ---- compatibility with the configuration contrib/tokenbiryani-oauth introduced ----
+# ---- the file/env token sources `type: oauth` started out with ----------------
 
 def build_oauth(options, token_provider=None):
     from tokenbiryani.config import AccountConfig

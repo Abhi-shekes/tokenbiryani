@@ -1,7 +1,6 @@
 blank_issues_enabled: true
-contact_links:
-  - name: Security vulnerability
-    url: https://github.com/OWNER/tokenbiryani/security/advisories/new
-    about: >
-      Please report privately. This project holds live API credentials — see
-      SECURITY.md.
+# A contact_link needs an absolute URL, and this repository has no home yet, so
+# pointing at a private-advisory page would be a dead link on the one form people
+# use when something is wrong. GitHub surfaces SECURITY.md by itself, and that file
+# says how to report privately.
+contact_links: []

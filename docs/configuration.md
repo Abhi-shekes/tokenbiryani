@@ -5,7 +5,7 @@ environment; a reference to an unset variable with no default is an error at loa
 rather than a mystery at runtime.
 
 The complete annotated reference is
-[`tokenbiryani.example.yaml`](https://github.com/OWNER/tokenbiryani/blob/main/tokenbiryani.example.yaml).
+`tokenbiryani.example.yaml`, in the repository root.
 This page covers what tends to need explaining.
 
 ## Hot reload

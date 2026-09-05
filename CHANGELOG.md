@@ -79,11 +79,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ever stops beating cache-blind routing.
 - End-to-end smoke test over real sockets.
 
-### Deprecated
+### Removed
+- Dead `github.com/OWNER/...` links from `pyproject.toml`, `mkdocs.yml`, the issue
+  template and the docs. This repository has no home yet, so each of those shipped a
+  404 — including a "report a vulnerability privately" link that went nowhere.
 - `contrib/tokenbiryani-oauth`. `type: oauth` is a built-in account type now, and a
-  plugin may not shadow a built-in, so the entry point is gone. Core absorbed the
-  package's token sources with identical option names, so existing configuration keeps
-  working; what remains is a re-export shim that warns on import.
+  plugin may not shadow a built-in, so its entry point could no longer load. Core
+  carries the same token sources under the same option names — `credentials_path`,
+  `token_env`, `access_token` — so configuration written against it keeps working.
+  The package was never published, so the shim protected no one and is gone.
 
 **Project**
 - Container image (non-root, healthchecked) and `docker compose up`.

@@ -1,12 +1,24 @@
 # Contributing
 
 ```bash
-git clone https://github.com/OWNER/tokenbiryani && cd tokenbiryani
+cd tokenbiryani
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-pytest                 # 86 tests, ~1.5s
+pip install -e ".[dev,secrets]"
+pytest                 # 312 tests
 bash scripts/smoke.sh  # end-to-end over real sockets
 ```
+
+Or bring the whole thing up in containers — gateway, Redis and a mock Anthropic —
+with the source bind-mounted so edits reload:
+
+```bash
+docker compose up -d          # then http://localhost:8787/console
+docker compose exec gateway pytest -q
+docker compose down
+```
+
+`scripts/dev.sh` is the same stack without Docker; it writes a mock-backed
+`tokenbiryani.yaml` on first run.
 
 ## The mock upstream is the point
 
@@ -42,8 +54,9 @@ it in a real browser and is the only thing that can catch a panel that renders e
 It skips itself when no Chrome or Chromium is installed, so it will pass silently on a
 machine that cannot run it — check CI.
 
-Screenshot-worthy states to keep working: no accounts (onboarding), one account (the
-table degrades to a card), the whole pool cooling, and a disabled credential.
+Screenshot-worthy states to keep working: no accounts (onboarding), the whole pool
+cooling, a disabled credential, a rejected key, and a gateway that has stopped
+answering — the last two are easy to break and invisible until someone hits them.
 
 ## Concurrency
 

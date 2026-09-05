@@ -44,9 +44,11 @@ dev = [
 [project.scripts]
 tokenbiryani = "tokenbiryani.cli:main"
 
-[project.urls]
-Homepage = "https://github.com/OWNER/tokenbiryani"
-Issues = "https://github.com/OWNER/tokenbiryani/issues"
+# Set these when the project has a home. Shipping links to a repository that does
+# not exist is worse than shipping none.
+# [project.urls]
+# Homepage = "https://github.com/<owner>/tokenbiryani"
+# Issues = "https://github.com/<owner>/tokenbiryani/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tokenbiryani"]

@@ -9,9 +9,9 @@ the gateway inherits a fresh token for free — the CLI does the refreshing. If 
 token expires and nothing renews it, the account is disabled with a message telling
 the operator to run the CLI once. An honest failure, and much better than a silent one.
 
-These sources came from `contrib/tokenbiryani-oauth`, which is where `type: oauth`
-started. They live in core now so that every configuration that package supported
-keeps working unchanged.
+These sources are where `type: oauth` started, before the gateway could run a login
+of its own. They are kept so that configuration written against that behaviour keeps
+working unchanged.
 """
 
 from __future__ import annotations

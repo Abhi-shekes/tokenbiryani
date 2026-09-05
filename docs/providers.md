@@ -33,9 +33,6 @@ API-key account in the pool.
 There is also a terms question, and it is not the same question for one account as for
 several. [docs/oauth.md](oauth.md) covers both.
 
-> `contrib/tokenbiryani-oauth` introduced this account type and is now deprecated —
-> core absorbed it, including its `credentials_path`, `token_env` and `access_token`
-> options, so existing configuration keeps working unchanged.
 
 ## The one place bodies are rewritten
 
