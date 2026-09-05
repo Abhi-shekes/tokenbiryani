@@ -29,7 +29,7 @@ def free_port() -> int:
 
 
 @pytest.fixture(scope="module")
-def live(request):
+def live(request, tmp_path_factory):
     """A real HTTP gateway, with the mock wired in as a transport rather than a server."""
     import uvicorn
 
@@ -38,6 +38,10 @@ def live(request):
 
     mock = MockAnthropic()
     config = make_config(["acct-01", "acct-02"])
+    # These tests add accounts through the console, which encrypts the credential
+    # first. Without a path the key lands in the working directory — a 0600 secret
+    # dropped into the repository, reused by every later run.
+    config.store.secret_key_path = str(tmp_path_factory.mktemp("secrets") / "secret.key")
     gateway = build(mock, config)
     app = create_app(config, gateway)
     port = free_port()

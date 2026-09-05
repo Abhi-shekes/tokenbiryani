@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -100,3 +101,23 @@ async def drain(iterator) -> bytes:
     async for chunk in iterator:
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_secrets_in_the_working_directory():
+    """Fail the run if a test drops a credential-encryption key into the repository.
+
+    `store.secret_key_path` defaults to `tokenbiryani.key` relative to the working
+    directory, so any test that stores an account without overriding it writes a
+    0600 secret next to the source and silently reuses it on the next run.
+    """
+    key = pathlib.Path("tokenbiryani.key")
+    existed = key.exists()
+    yield
+    if key.exists() and not existed:
+        created = key
+        key.unlink()
+        raise AssertionError(
+            f"a test wrote {created} into the working directory; point "
+            "store.secret_key_path at tmp_path in that test's config"
+        )
