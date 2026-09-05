@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Quota pacing. `GET /admin/pacing` answers a question nothing else here answered:
+  not "is there capacity now" but "should this be spent now". It reports, per scope,
+  how far through the quota window we are against how much of the quota is gone, and
+  says whether the pool is on course to run dry early or to reach the end of the week
+  with quota unused. Documented in `docs/pacing.md`.
+- `pacing.curve: business_hours` targets Monday–Friday 09:00–17:00 UTC instead of a
+  flat line, so a team that does not work weekends stops reading as behind pace every
+  Monday morning.
+- `pacing.mode: enforcing` holds **batch-priority requests only**, for a delay that
+  scales with how far ahead of pace the pool is. Interactive traffic is never
+  delayed. Reported as `paced_for` on the request.
+- `pacing.weekly_budget_usd` paces API-key accounts against spend since Monday
+  00:00 UTC. Subscriptions need nothing: they report their own `unified-5h` and
+  `unified-7d` utilisation. Without a stated budget, API-key accounts are simply not
+  paced rather than paced against an invented figure.
 - `GET /admin/cache-advice` separates the two reasons a cache hit rate is zero: a
   client that never sent a `cache_control` breakpoint, which no routing change can
   fix, and a breakpoint that is present while affinity keeps breaking, which is the

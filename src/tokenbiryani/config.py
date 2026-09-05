@@ -246,6 +246,33 @@ class StoreConfig:
 
 
 @dataclass
+class PacingConfig:
+    """Spending a quota window on purpose rather than by accident.
+
+    Advisory by default: it reports, and changes nothing. `enforcing` throttles
+    `batch` priority only — interactive traffic is never delayed to protect a
+    budget, because an operator who wants that wants a spend cap, which already
+    exists and fails honestly instead of quietly adding latency.
+    """
+
+    enabled: bool = True
+    #: advisory | enforcing
+    mode: str = "advisory"
+    #: Which reported window to pace against, for accounts that report one: 5h | 7d
+    window: str = "7d"
+    #: linear | business_hours. A linear target expects a fifth of the quota spent
+    #: over a weekend, so a Monday-to-Friday team reads as behind pace every Monday.
+    curve: str = "linear"
+    ahead_threshold: float = 0.10
+    behind_threshold: float = 0.10
+    max_batch_delay_seconds: float = 30.0
+    #: Required for API-key accounts, which report no weekly window of any kind.
+    #: Without it they are simply not paced: inventing a weekly limit would be a
+    #: number nobody can attribute.
+    weekly_budget_usd: Optional[float] = None
+
+
+@dataclass
 class CacheConfig:
     """Prompt-cache diagnosis, and the one opt-in that acts on it."""
 
@@ -315,6 +342,7 @@ class Config:
     store: StoreConfig = field(default_factory=StoreConfig)
     spend: SpendConfig = field(default_factory=SpendConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    pacing: PacingConfig = field(default_factory=PacingConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     oauth: OAuthConfig = field(default_factory=OAuthConfig)
     accounts: List[AccountConfig] = field(default_factory=list)
@@ -444,6 +472,7 @@ class Config:
             store=build(StoreConfig, raw.get("store")),
             spend=build(SpendConfig, raw.get("spend")),
             cache=build(CacheConfig, raw.get("cache")),
+            pacing=build(PacingConfig, raw.get("pacing")),
             observability=build(ObservabilityConfig, raw.get("observability")),
             oauth=build(OAuthConfig, raw.get("oauth")),
             accounts=accounts,

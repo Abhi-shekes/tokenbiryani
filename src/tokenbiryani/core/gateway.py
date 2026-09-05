@@ -54,6 +54,8 @@ from .estimator import OutputEstimator
 from .keys import KeyRegistry, generate_key, record_from_config
 from .limits import LimitMirror, TokenEstimate, estimate_request
 from .oauth import OAuthClient, OAuthError, OAuthTokens, PendingLogin, make_verifier
+from .pacing import PaceReading, PacingGovernor
+from .pacing import week_start as _pacing_week_start
 from .queue import (
     MAX_WAIT_HEADER,
     PRIORITY_BATCH,
@@ -127,6 +129,29 @@ def _response_headers(upstream_headers: Mapping[str, str], account_id: str) -> D
     return out
 
 
+#: How long a computed pace is reused for. A quota window is days long; a request
+#: does not need a fresher number than this, and pacing reads the spend ledger.
+PACE_CACHE_SECONDS = 5.0
+
+
+def _pacing_settings(config: Config) -> Dict[str, Any]:
+    pacing = config.pacing
+    return {
+        "enabled": pacing.enabled,
+        "mode": pacing.mode,
+        "window": pacing.window,
+        "curve": pacing.curve,
+        "ahead_threshold": pacing.ahead_threshold,
+        "behind_threshold": pacing.behind_threshold,
+        "max_batch_delay_seconds": pacing.max_batch_delay_seconds,
+        "weekly_budget_usd": pacing.weekly_budget_usd,
+    }
+
+
+def _build_pacing(config: Config) -> PacingGovernor:
+    return PacingGovernor(**_pacing_settings(config))
+
+
 def _build_estimator(config: Config) -> OutputEstimator:
     """One estimator per gateway, configured from `routing.*`."""
     routing = config.routing
@@ -157,6 +182,11 @@ class Gateway:
         self.cache_advisor = CacheAdvisor(
             min_requests=config.cache.advice_min_requests
         )
+        self.pacing = _build_pacing(config)
+        #: Pacing reads the spend ledger, which is a store round trip. A request
+        #: does not need a fresher answer than this — a quota window is days long.
+        self._pace_value: Optional[float] = None
+        self._pace_cached_at: float = 0.0
 
         self.accounts: Dict[str, AccountRuntime] = {}
         self.upstreams: Dict[str, Upstream] = {}
@@ -1176,6 +1206,7 @@ class Gateway:
             max_undershoot=config.routing.output_estimate_max_undershoot,
         )
         self.cache_advisor.reconfigure(config.cache.advice_min_requests)
+        self.pacing.reconfigure(**_pacing_settings(config))
         self.gate.max_size = config.queue.max_size
         self.gate.default_max_wait = config.queue.default_max_wait_seconds
         self._file_pricing_table = config.pricing_table
@@ -1428,8 +1459,44 @@ class Gateway:
             max_wait=max_wait,
         )
 
+    async def _cached_pace(self) -> Optional[float]:
+        now = time.time()
+        if self._pace_cached_at + PACE_CACHE_SECONDS > now:
+            return self._pace_value
+        self._pace_value = await self._pace()
+        self._pace_cached_at = now
+        return self._pace_value
+
+    async def _apply_pacing(self, plan: _Plan) -> None:
+        """Hold a batch request back while the pool is ahead of its quota pace.
+
+        Deliberately a wait rather than a rejection. Waiting is what spends a window
+        more slowly; rejecting just moves the same work to whenever the client
+        retries, which is usually immediately.
+        """
+        if not self.pacing.enforcing or plan.priority < PRIORITY_BATCH:
+            return
+        delay = self.pacing.delay_for(
+            plan.priority, PRIORITY_BATCH, await self._cached_pace()
+        )
+        budget = min(
+            delay,
+            max(0.0, plan.deadline - time.time()),
+            max(0.0, plan.max_wait - plan.queued_seconds),
+        )
+        if budget <= 0:
+            return
+        started = time.time()
+        try:
+            await asyncio.sleep(budget)
+        finally:
+            waited = time.time() - started
+            plan.queued_seconds += waited
+            plan.event.paced_for = round(waited, 3)
+
     async def _acquire(self, plan: _Plan) -> Tuple[AccountRuntime, Decision]:
         """Route, or wait on the queue for capacity that is known to be coming."""
+        await self._apply_pacing(plan)
         while True:
             now = time.time()
             if now >= plan.deadline:
@@ -1925,6 +1992,54 @@ class Gateway:
         raise last or GatewayError(502, "all accounts failed")
 
     # ---- introspection -------------------------------------------------------
+
+    async def pace_readings(self) -> List[PaceReading]:
+        """One reading per account that reports a window, plus the pool's budget.
+
+        An account that reports unified utilisation is paced on what it says about
+        itself. An API-key account says nothing about a week, so it can only be
+        paced against a budget the operator stated — and if none is stated it is
+        left out rather than guessed at.
+        """
+        now = time.time()
+        readings: List[PaceReading] = []
+        if not self.pacing.enabled:
+            return readings
+
+        for account in self.accounts.values():
+            window = account.mirror.unified.get(self.pacing.window)
+            if window is None or window.utilization is None:
+                continue
+            reading = self.pacing.from_unified(
+                account.id, window.utilization, window.seconds_to_reset(now), now
+            )
+            if reading is not None:
+                readings.append(reading)
+
+        if self.pacing.weekly_budget_usd:
+            since = max(1.0, now - _pacing_week_start(now))
+            spent = sum(
+                (await self.store.spend_by_scope(SCOPE_ACCOUNT, since)).values()
+            )
+            reading = self.pacing.from_budget("pool", spent, now)
+            if reading is not None:
+                readings.append(reading)
+        return readings
+
+    async def pacing_report(self) -> Dict[str, Any]:
+        return self.pacing.report(await self.pace_readings(), time.time())
+
+    async def _pace(self) -> Optional[float]:
+        """The tightest pace across every scope, or None when nothing is paced.
+
+        The tightest and not the mean: one account about to run dry on Wednesday is
+        the fact worth acting on, and averaging it against three healthy ones is how
+        that fact gets lost.
+        """
+        readings = await self.pace_readings()
+        if not readings:
+            return None
+        return max(reading.pace for reading in readings)
 
     def capacity_horizon(self, minutes: int = 60, buckets: int = 12) -> Dict[str, Any]:
         """Projected input-token capacity over the next hour.

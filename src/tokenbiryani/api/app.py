@@ -214,6 +214,13 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         authenticate_admin(request)
         return JSONResponse(app.state.gateway.estimator.snapshot())
 
+    @app.get("/admin/pacing")
+    async def pacing(request: Request) -> JSONResponse:
+        """Whether this pool is on course to spend its quota window, or to run dry
+        early, or to reach the end of the week with quota unused."""
+        authenticate_admin(request)
+        return JSONResponse(await app.state.gateway.pacing_report())
+
     @app.get("/admin/cache-advice")
     async def cache_advice(request: Request) -> JSONResponse:
         """Why the cache hit rate is what it is, per virtual key and model.

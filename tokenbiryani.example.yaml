@@ -37,6 +37,23 @@ routing:
     errors: 0.20
     cost: 0.10
 
+pacing:
+  # Whether the pool is on course to spend its quota window, run dry early, or reach
+  # the end of the week with quota unused. Advisory reports and changes nothing.
+  enabled: true
+  mode: advisory            # advisory | enforcing
+  window: 7d                # 5h | 7d — for accounts that report a rolling window
+  curve: linear             # linear | business_hours (Mon-Fri 09:00-17:00 UTC)
+  ahead_threshold: 0.10
+  behind_threshold: 0.10
+  # Enforcing holds BATCH-priority requests only, scaled by how far ahead of pace the
+  # pool is. Interactive traffic is never delayed to protect a budget.
+  max_batch_delay_seconds: 30
+  # Required for API-key accounts: they report no weekly window of any kind, so
+  # without a stated budget they are simply not paced. Subscriptions report their own
+  # 5h and 7d utilisation and need nothing here.
+  # weekly_budget_usd: 400
+
 cache:
   # Add a cache_control breakpoint to requests that carry none, at the end of the
   # stable head. OFF by default and best left off: everywhere else this gateway

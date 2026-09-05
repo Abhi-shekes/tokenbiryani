@@ -43,6 +43,9 @@ class RequestEvent:
     latency: float = 0.0
     ttft: Optional[float] = None
     queued_for: float = 0.0
+    #: Seconds this request was deliberately held back to protect a quota window.
+    #: Batch priority only, and only when pacing is enforcing.
+    paced_for: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0

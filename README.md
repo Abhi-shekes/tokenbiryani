@@ -261,6 +261,7 @@ tokenbiryani status --json   # same data, for scripts
 | `GET /admin/requests/{id}` | **why that request went where it did** — attempt chain, per-candidate scores, verdicts |
 | `GET /admin/horizon` | projected capacity for the next hour |
 | `GET /admin/estimation` | what the output estimator has learned, per model |
+| `GET /admin/pacing` | **is this pool on course to spend its week** — or run dry early, or strand quota |
 | `GET /admin/cache-advice` | **why the cache hit rate is what it is** — whether the client ever sent a breakpoint, per key and model |
 | `GET /admin/events` | live SSE feed |
 
