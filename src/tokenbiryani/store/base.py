@@ -33,6 +33,20 @@ class StateStore(abc.ABC):
         ...
 
     @abc.abstractmethod
+    async def clear_affinity_for_account(self, account_id: str) -> int:
+        """Drop every session pinned to this account; return how many. 
+
+        Called when an account is deleted. Without it those sessions keep naming a
+        credential that no longer exists for the rest of the affinity TTL: the
+        router cannot match the owner, so it scores every candidate at zero
+        affinity and reports a cache break on each one — noise attributed to
+        routing for something routing did not do.
+
+        Not called on *disable*, which is usually temporary. A disabled account
+        that comes back should find its conversations still pinned to it.
+        """
+
+    @abc.abstractmethod
     async def record_key_request(self, key_name: str, now: float) -> int:
         """Record a request against a virtual key; return its count in the last 60s."""
 

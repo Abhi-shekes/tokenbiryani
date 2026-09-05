@@ -35,7 +35,9 @@ round-robin.
 ## What to check
 
 1. **Your strategy.** `sticky_headroom` is the default for this reason. `headroom`,
-   `least_loaded` and `round_robin` are all cache-blind.
+   `least_loaded` and `round_robin` are all cache-blind — and note that `headroom`
+   is `sticky_headroom` with affinity switched off and nothing else changed, so it
+   can never route *better*, only the same or worse.
 2. **Cache breaks.** `tokenbiryani status` reports them, and so does the console.
    A healthy pool should show approximately zero. Breaks mean the affinity owner
    could not serve — usually because it was cooling.
@@ -49,6 +51,13 @@ round-robin.
 ## When breaking affinity is right
 
 When the owner genuinely cannot serve: it is cooling, disabled, or out of headroom.
-The router scores affinity against real availability rather than treating it as
-absolute, and every forced break is counted so the cost is visible rather than
-silent.
+
+Under the default weights that decision is made by the **filter**, not the score.
+Affinity is worth 0.40 and headroom at most 0.40, so no headroom advantage a rival
+can hold — not even 100% against the owner's 1% — is enough to move a conversation.
+What moves it is the owner becoming ineligible: cooling, disabled, over its spend
+cap, at max concurrency, or with too little projected headroom to serve the request
+at all. Affinity is effectively absolute right up to the point the owner cannot
+serve, which is the behaviour you want and is stronger than a scoring trade-off.
+
+Every forced break is counted, so the cost is visible rather than silent.

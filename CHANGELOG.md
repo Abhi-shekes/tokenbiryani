@@ -6,6 +6,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Session affinity keys are namespaced by the virtual key that presented the
+  request. `session_key()` takes a `scope`, and the gateway passes `key.name`.
+- `StateStore.clear_affinity_for_account()`, implemented on all three backends, so
+  deleting an account releases the sessions pinned to it.
+
+### Fixed
+- Two tenants could share one affinity entry. Session keys were global: either could
+  steer the other's routing by sending the same `X-TokenBiryani-Session` value, and
+  the `fp:` fingerprint collides whenever two callers run the same agent with the
+  same system prompt, tool names and opening messages — the normal case for one
+  popular client rather than a contrived one. **Existing affinity entries do not
+  survive this change**, so the first request of each live conversation after an
+  upgrade takes one cache miss.
+- Deleting an account left every session pinned to it naming a credential that no
+  longer existed. The router cannot match a missing owner, so it scored every
+  candidate at zero affinity and reported a cache break on each of those requests
+  for the rest of the affinity TTL — noise attributed to routing for something
+  routing did not do. `clear_override` deliberately does not release affinity: that
+  account survives, it only stops being overridden.
+- `docs/caching.md` said the router "scores affinity against real availability
+  rather than treating it as absolute". Under the default weights affinity is worth
+  0.40 and headroom at most 0.40, so no headroom advantage can move a conversation —
+  the eligibility filter moves it, not the score. The page now describes what the
+  code does, which is the stronger guarantee.
+- `README.md` and `docs/routing.md` recommended `headroom` for stateless batch
+  traffic. It is `sticky_headroom` with affinity switched off and nothing else
+  changed, so it scores identically whenever a request has no cache owner and can
+  never route better — only the same, or worse.
+- `docs/routing.md` now warns that `cost_tiered` normalises its cost term across the
+  eligible pool, which erases the size of a tier gap: 1.0 against 1.05 scores exactly
+  as far apart as 1.0 against 5.0. It will re-home an established conversation over a
+  5% tier difference, and a cache break costs far more than 5%.
+- `AccountConfig.cost_tier` now says in the code what it is: a routing weight that
+  never enters cost accounting. Reported spend and every spend cap come from the
+  model price table alone.
 - A release workflow. A `v*` tag is now the only thing that publishes: it refuses to
   run unless the tag, `pyproject.toml` and `__init__.py` name the same version and
   `CHANGELOG.md` has a dated section for it, then builds the wheel, creates the

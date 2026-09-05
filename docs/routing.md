@@ -44,7 +44,7 @@ session key, so selection is stable and reproducible under replay.
 | Strategy | Behaviour |
 |---|---|
 | `sticky_headroom` | **Default.** Affinity, then most headroom. |
-| `headroom` | Pure most-available. Correct for stateless batch traffic. |
+| `headroom` | `sticky_headroom` with affinity off. Identical to it whenever a request has no cache owner, so it never routes better — only the same, or worse. |
 | `cost_tiered` | Drain cheap accounts first, spill upward. |
 | `priority` | Strict ordered failover: primary, then backup. |
 | `least_loaded` | Baseline. |
@@ -52,6 +52,15 @@ session key, so selection is stable and reproducible under replay.
 
 The last three are cache-blind. Read [Why is my bill higher?](caching.md) before
 choosing one.
+
+`cost_tiered` deserves its own warning. Its cost term is normalised across the
+eligible pool, so the *size* of a tier gap is erased: accounts at 1.0 and 1.05 score
+exactly as far apart as accounts at 1.0 and 5.0. With cost weighted at 0.80 against
+affinity's 0.20 it will re-home an established conversation over a 5% tier
+difference, and a cache break costs far more than 5%. `sticky_headroom` already
+prefers the cheaper account when placing a *new* session, which is the part worth
+having — so set `cost_tier` and leave the strategy alone unless your tiers differ by
+more than the cache penalty.
 
 `tokenbiryani strategies` lists what your install actually has, including plugins.
 

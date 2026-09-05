@@ -50,6 +50,10 @@ class AccountConfig:
     #: so a bedrock or vertex account is not silently pointed at api.anthropic.com.
     base_url: str = ""
     priority: float = 0.0
+    #: A routing weight, not a price. `cost_tiered` drains low tiers first and
+    #: `sticky_headroom` prefers them on placement, but this number never enters
+    #: cost accounting: reported spend and every spend cap come from the model
+    #: price table alone. Set it to rank accounts, not to describe a rate.
     cost_tier: float = 1.0
     models: List[str] = field(default_factory=lambda: ["*"])
     max_concurrency: int = 16

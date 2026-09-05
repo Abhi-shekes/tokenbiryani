@@ -109,7 +109,7 @@ Set `routing.strategy`:
 | Strategy | Behaviour |
 |---|---|
 | `sticky_headroom` | **Default.** Affinity, then most headroom. |
-| `headroom` | Pure most-available. Correct for stateless batch traffic. |
+| `headroom` | `sticky_headroom` with affinity off, and nothing else changed. Identical to the default for traffic that has no cache owner, so it never routes better. |
 | `cost_tiered` | Drain cheap accounts first, spill upward. |
 | `priority` | Strict ordered failover: primary, then backup. |
 | `least_loaded` | Baseline. |

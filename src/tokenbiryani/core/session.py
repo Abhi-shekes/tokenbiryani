@@ -78,13 +78,32 @@ def fingerprint(body: Mapping[str, Any]) -> str:
     return digest[:32]
 
 
-def session_key(body: Mapping[str, Any], headers: Optional[Mapping[str, str]] = None) -> str:
-    """An explicit header always wins; otherwise fall back to the fingerprint."""
+def session_key(
+    body: Mapping[str, Any],
+    headers: Optional[Mapping[str, str]] = None,
+    scope: str = "",
+) -> str:
+    """An explicit header always wins; otherwise fall back to the fingerprint.
+
+    ``scope`` namespaces the result to one tenant. Without it the key is global, and
+    two tenants collide in two ways that both matter: either can steer the other's
+    affinity by choosing the same ``X-TokenBiryani-Session`` value, and two callers
+    running the same agent share a fingerprint whenever their system prompt, tool
+    names and opening messages match — which is the normal case for one popular
+    client, not a contrived one. Pass the virtual key's name and neither happens.
+    """
     if headers:
         for name, value in headers.items():
             if name.lower() == SESSION_HEADER and value.strip():
-                return "hdr:" + value.strip()[:128]
-    return "fp:" + fingerprint(body)
+                return _scoped(scope, "hdr:" + value.strip()[:128])
+    return _scoped(scope, "fp:" + fingerprint(body))
+
+
+def _scoped(scope: str, key: str) -> str:
+    """Prefix a session key with its tenant, when there is one."""
+    if not scope:
+        return key
+    return "k:" + str(scope)[:64] + "|" + key
 
 
 def cache_prefix_size(body: Mapping[str, Any]) -> int:

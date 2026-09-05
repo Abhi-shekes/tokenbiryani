@@ -618,6 +618,17 @@ class Gateway:
                 kind="invalid_request_error",
             )
         removed = await self.store.delete_account(account_id)
+        # Before the pool is rebuilt: every session pinned here now names a
+        # credential that no longer exists, and leaving them to expire would
+        # report a cache break on each one for the rest of the affinity TTL.
+        # `clear_override` deliberately does not do this — that account survives,
+        # it only stops being overridden.
+        try:
+            dropped = await self.store.clear_affinity_for_account(account_id)
+            if dropped:
+                logger.info("released %d session(s) pinned to %s", dropped, account_id)
+        except Exception:  # noqa: BLE001 - a store blip must not fail the delete
+            logger.warning("could not release affinity for %s", account_id, exc_info=True)
         await self.refresh_accounts()
         return removed
 
@@ -1336,7 +1347,7 @@ class Gateway:
             else self.config.queue.default_max_wait_seconds,
         )
 
-        session = compute_session_key(body, headers)
+        session = compute_session_key(body, headers, scope=key.name)
         owner = await self.store.get_affinity(session)
         estimate = estimate_request(body, self.config.routing.estimate_safety_margin)
         request_id = "req_" + uuid.uuid4().hex[:20]

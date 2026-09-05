@@ -51,3 +51,28 @@ def test_structured_content_blocks_are_handled():
         "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
     }
     assert fingerprint(body)
+
+
+def test_scope_namespaces_the_session_key():
+    """Two tenants sending the same session header must not share an entry."""
+    headers = {SESSION_HEADER: "shared-name"}
+    assert session_key(convo(4), headers, scope="tenant-a") != session_key(
+        convo(4), headers, scope="tenant-b"
+    )
+
+
+def test_scope_namespaces_the_fingerprint_too():
+    """The likelier collision: two callers running the same agent."""
+    assert session_key(convo(4), {}, scope="tenant-a") != session_key(
+        convo(4), {}, scope="tenant-b"
+    )
+
+
+def test_the_same_tenant_still_shares_one_key():
+    assert session_key(convo(2), {}, scope="t") == session_key(convo(20), {}, scope="t")
+
+
+def test_an_absent_scope_leaves_the_key_unprefixed():
+    """Callers that pass no scope keep the original format."""
+    assert session_key(convo(4), {}).startswith("fp:")
+    assert session_key(convo(4), {SESSION_HEADER: "s"}).startswith("hdr:")

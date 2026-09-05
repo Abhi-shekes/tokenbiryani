@@ -84,6 +84,20 @@ class RedisStateStore(StateStore):
     async def clear_affinity(self, session_key: str) -> None:
         await self.client.delete(self._key("affinity", session_key))
 
+    async def clear_affinity_for_account(self, account_id: str) -> int:
+        """Scan the affinity keyspace and drop the ones this account owns.
+
+        A scan rather than a reverse index: deleting an account is rare and
+        operator-driven, while `set_affinity` runs on every successful request.
+        Paying a little on the rare path keeps the hot one a single SET.
+        """
+        pattern = self._key("affinity", "*")
+        removed = 0
+        async for key in self.client.scan_iter(match=pattern, count=500):
+            if await self.client.get(key) == account_id:
+                removed += int(await self.client.delete(key) or 0)
+        return removed
+
     # ---- per-key request rate ------------------------------------------------
 
     async def record_key_request(self, key_name: str, now: float) -> int:
