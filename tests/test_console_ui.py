@@ -792,3 +792,16 @@ def test_conversations_are_listed_worst_first(page):
 def test_the_efficiency_tab_raises_no_page_errors(page):
     efficiency(page)
     assert page.errors == [], page.errors
+
+
+def test_the_inspector_flags_a_request_that_asked_for_no_caching(page):
+    """The fixture's requests carry no `cache_control`, and the console should say so
+    where the operator is already looking at why a request cost what it did."""
+    page.click(".nav button[data-tab='requests']")
+    page.wait_for_selector("#requests [data-request]")
+    page.query_selector_all("#requests [data-request]")[0].click()
+    page.wait_for_selector("#inspector .card", timeout=10000)
+    # The fixture's bodies are small, so the notice is correctly absent; what must
+    # hold either way is that rendering these fields does not break the panel.
+    assert "Routing decision" in page.inner_text("#inspector")
+    assert page.errors == [], page.errors

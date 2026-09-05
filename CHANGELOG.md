@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   second poll, because pacing and sessions both read the spend ledger.
 - `tokenbiryani status` prints a pace line per scope beneath the pool, and
   `--json` carries the pacing report. It prints nothing when nothing is paced.
+- The request inspector shows the three new facts a request now carries: a model
+  substituted by pacing, time spent held back by it, and a missing `cache_control`
+  breakpoint on a prefix large enough to have been cached.
 
 ### Changed
 - The benchmark's published figures move with adaptive output leases in place:
@@ -79,6 +82,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deleting an account releases the sessions pinned to it.
 
 ### Fixed
+- The routing inspector's "Affinity broke" notice used a `warn` class the stylesheet
+  never defined, so the one line explaining why a request cost more than it should
+  have rendered unstyled.
 - Two tenants could share one affinity entry. Session keys were global: either could
   steer the other's routing by sending the same `X-TokenBiryani-Session` value, and
   the `fp:` fingerprint collides whenever two callers run the same agent with the

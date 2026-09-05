@@ -1478,6 +1478,17 @@ function renderInspector(request) {
       ${request.queued_for ? `<p style="color:var(--text-3);font-size:11px">queued ${request.queued_for.toFixed(2)}s waiting for capacity</p>` : ""}
       ${request.affinity_broken ? `<div class="note warn">Affinity broke: this
         conversation moved off the account holding its prompt cache, so its prefix was billed fresh.</div>` : ""}
+      ${request.model_requested ? `<div class="note warn">Downshifted: the caller asked
+        for <span class="mono">${esc(request.model_requested)}</span> and this ran on
+        <span class="mono">${esc(request.model)}</span>, because the pool was ahead of
+        its quota pace. Batch priority only — see pacing.model_downshift.</div>` : ""}
+      ${request.paced_for ? `<p style="color:var(--text-3);font-size:11px">held
+        ${request.paced_for.toFixed(2)}s by pacing, to spend the quota window more
+        slowly</p>` : ""}
+      ${request.cache_breakpoint === false && request.prefix_tokens >= 1024
+        ? `<div class="note warn">No <span class="mono">cache_control</span> breakpoint,
+           on a stable prefix of about ${tokens(request.prefix_tokens)} tokens: the cache
+           never engages for this request, and no routing change alters that.</div>` : ""}
       <h4>Routing decision${decision ? " · strategy " + esc(decision.strategy) : ""}</h4>
       ${table}
       <div class="kv">
