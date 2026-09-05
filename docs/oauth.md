@@ -101,9 +101,9 @@ Repeat per subscription. Each gets its own session.
 ## How sessions are kept alive
 
 The gateway renews each session `refresh_skew_seconds` before it expires, in a
-background task. This is the main thing core does that
-`contrib/tokenbiryani-oauth` does not — that package leans on the Claude CLI to
-refresh its file, and a gateway holding several sessions has no CLI to lean on.
+background task. This is what makes pooling more than one subscription possible:
+reading a credentials file the Claude CLI keeps fresh covers a single session, and a
+gateway holding several has no CLI to lean on.
 
 If a renewal fails, the account is **disabled with a reason** rather than retried
 forever. An account that reads "ready" and returns 401 on every request is the outcome

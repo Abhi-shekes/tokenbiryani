@@ -1,11 +1,11 @@
 """`type: oauth` — an account backed by a Claude subscription session.
 
-This is the core counterpart to `contrib/tokenbiryani-oauth`. The difference is
-where the token comes from: contrib reads the one credentials file the Claude CLI
-maintains, which is one subscription per machine. This one reads a token the gateway
-obtained itself and holds per account, which is what pooling several requires.
+The token normally comes from a login the gateway ran itself and holds per account,
+which is what pooling more than one subscription requires. It can also come from a
+credentials file or an environment variable — see `oauth_credentials` — for the case
+where something else already obtained it.
 
-**What an oauth account costs you, unchanged from contrib's README:** every routing
+**What an oauth account costs you:** every routing
 feature that distinguishes this project from a generic proxy is computed from
 `anthropic-ratelimit-*` response headers, and subscription sessions do not send them.
 Headroom routing, binding leases, admission control and the capacity horizon all go
@@ -59,10 +59,10 @@ class OAuthUpstream(Upstream):
 
         # Two ways an oauth account gets a token, and explicit config wins.
         #
-        # `type: oauth` began in contrib/tokenbiryani-oauth, where it meant "read the
-        # token the Claude CLI already wrote". Those configs must keep working
-        # verbatim, so any account naming a source keeps using it; only accounts with
-        # no source configured use the session the gateway logged in for and refreshes.
+        # `type: oauth` originally meant only "read the token the Claude CLI already
+        # wrote". Those configs keep working verbatim, so any account naming a source
+        # keeps using it; only accounts with no source configured use the session the
+        # gateway logged in for and refreshes.
         self._source: Optional[TokenSource] = None
         if any(options.get(k) for k in EXTERNAL_SOURCE_OPTIONS):
             self._source = build_source(options)

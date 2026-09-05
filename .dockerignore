@@ -35,7 +35,6 @@ docs
 site
 mkdocs.yml
 scripts
-contrib
 *.md
 !README.md
 

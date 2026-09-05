@@ -1,10 +1,9 @@
 """The OAuth 2.0 + PKCE login flow behind "Log in with Claude".
 
-Why this exists in core when `contrib/tokenbiryani-oauth` already reads a token:
-that package reads the *one* credentials file the Claude CLI maintains, which is
-exactly one subscription per machine. Pooling — the entire point of this gateway —
-needs several, each with its own session, and that means the gateway has to run the
-login itself and hold the tokens. See ADR-0004.
+Why the gateway runs the login itself rather than reading a token someone else
+wrote: the credentials file the Claude CLI maintains is exactly one subscription per
+machine. Pooling — the entire point of this gateway — needs several, each with its
+own session. See ADR-0004.
 
 Two things are worth knowing before reading further.
 
@@ -15,9 +14,9 @@ mysteriously, `oauth.client_id`, `oauth.authorize_url` and `oauth.token_url` are
 required config with an error message that says so. The flow below is plain RFC 7636
 and is correct whatever those values turn out to be.
 
-**Refresh is implemented here, unlike in contrib.** That package deliberately leans
-on the CLI to refresh its file. A gateway holding several sessions has no CLI to lean
-on, so it refreshes them itself, ahead of expiry.
+**Refresh is implemented here.** Reading a file the Claude CLI refreshes works for a
+single session and nothing else; a gateway holding several has no CLI to lean on, so
+it renews them itself, ahead of expiry.
 """
 
 from __future__ import annotations

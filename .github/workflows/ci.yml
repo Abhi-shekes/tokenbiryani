@@ -71,18 +71,6 @@ jobs:
         env:
           TOKENBIRYANI_UI_BROWSER: chromium
 
-  contrib:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      # Separate distributions, tested separately. Core must never depend on them.
-      - run: pip install -e . && pip install -e "contrib/tokenbiryani-oauth[dev]"
-      - run: ruff check contrib/tokenbiryani-oauth
-      - run: pytest -q contrib/tokenbiryani-oauth/tests
-
   docs:
     runs-on: ubuntu-latest
     steps:
