@@ -1,0 +1,44 @@
+name: changelog
+
+# Its own file, and not a job in ci.yml, because of the label. `pull_request` without
+# a `types` list means [opened, synchronize, reopened] — so applying `no-changelog`
+# would never re-run the check that the label exists to switch off, and the required
+# check would stay red until the author pushed an unrelated commit. Listing the label
+# events here fixes that without re-running the whole test matrix every time someone
+# tidies up a label.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: changelog-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: The change is described in CHANGELOG.md
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE"
+          if git diff --name-only "origin/$BASE...HEAD" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md updated."
+            exit 0
+          fi
+          echo "::error file=CHANGELOG.md::This pull request changes nothing in \
+          CHANGELOG.md. Add a line under '## [Unreleased]' describing what changed \
+          for someone upgrading — or apply the 'no-changelog' label if it genuinely \
+          changes nothing a user would notice (a test, a refactor, a typo)."
+          exit 1
+      - name: Labelled no-changelog
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+        run: echo "Labelled no-changelog — nothing a user would notice. Not checking."

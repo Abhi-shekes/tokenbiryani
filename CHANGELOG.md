@@ -20,6 +20,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - CI packages the wheel on every run and asserts what is inside it — the price
   table and the console are there, the test scaffolding is not. That was previously
   discovered at release time.
+- The changelog check is its own workflow, so applying `no-changelog` re-runs it.
+  As a job in `ci.yml` it only fired on push events, which meant the label could
+  never clear the failure it exists to clear.
 - Branch and release process in `CONTRIBUTING.md`: `main` is protected and linear,
   work lands through short-lived prefixed branches, and the changelog is written as
   you go.
