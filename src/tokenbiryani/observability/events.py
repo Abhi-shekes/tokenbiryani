@@ -34,6 +34,9 @@ class RequestEvent:
     session_key: str = ""
     streamed: bool = False
     priority: str = "interactive"
+    #: The model the caller asked for, when pacing substituted a different one.
+    #: Empty when nothing was substituted, which is the normal case.
+    model_requested: str = ""
     #: "messages" (the normal path) or "batch" (spilled to the Batches API)
     via: str = "messages"
     batch_id: Optional[str] = None

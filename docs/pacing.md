@@ -86,6 +86,50 @@ more slowly; rejecting just moves the same work to whenever the client retries, 
 is usually immediately. The wait is bounded by that request's own deadline and wait
 budget like any other, and shows up as `paced_for` on the request.
 
+## Acting on it, beyond waiting
+
+Once pacing knows the pool is ahead, holding batch work back is not the only lever.
+
+### The cheaper lane
+
+```yaml
+pacing:
+  prefer_batch_lane_when_ahead: true   # the default, needs batch.enabled
+```
+
+While ahead of pace, batch-priority work goes to the Message Batches API **even
+though the pool has capacity for it now**. Batches are priced below standard and
+spend a different upstream limit, so this is strictly better than waiting: the work
+still happens, and it costs less. It is tried before the delay for that reason.
+
+With `batch.enabled` off there is no lane to prefer and the setting does nothing.
+
+### Downshifting the model
+
+```yaml
+pacing:
+  model_downshift:
+    claude-opus-*: claude-sonnet-5
+```
+
+**Empty by default, and think before filling it in.** Every other lever here changes
+*when* or *where* a request runs. This one changes *what the caller gets*, which is a
+different kind of decision and not one a gateway should make quietly.
+
+Three bounds, all enforced:
+
+- **Batch priority only.** An interactive session is never downshifted.
+- **Never widens a key's reach.** A substitution into a model the key's `models` list
+  does not allow is refused — a pacing policy must not hand a tenant something their
+  key does not permit.
+- **Recorded.** The request carries `model_requested` alongside `model`, and the
+  inspector shows both.
+
+One interaction worth knowing: the model is part of the affinity fingerprint, so a
+conversation that downshifts mid-flight lands on a different session key and takes a
+cache break. That is another reason this is batch-only — batch traffic is usually
+single-turn, where there is no cache to lose.
+
 ## Caveats worth knowing
 
 - The unified windows are **rolling**, and pacing treats one as though it began

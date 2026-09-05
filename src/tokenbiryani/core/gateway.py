@@ -31,6 +31,7 @@ from ..observability.usage import (
 )
 from ..providers.anthropic_api import build_upstream
 from ..providers.base import BLOCKED_RESPONSE_HEADERS, Upstream
+from ..providers.translate import map_model
 from ..proxy import sse
 from ..proxy.errors import (
     AccountAction,
@@ -1425,6 +1426,9 @@ class Gateway:
             else self.config.queue.default_max_wait_seconds,
         )
 
+        requested_model = model
+        model, body = await self._downshift(model, body, key, priority)
+
         # Diagnosis before dispatch: whether the caller asked for caching at all,
         # and how much stable head a breakpoint would have covered. Booleans and
         # token counts only — the body itself is never kept.
@@ -1453,6 +1457,7 @@ class Gateway:
             streamed=streamed,
         )
         event.priority = priority_name(priority)
+        event.model_requested = requested_model if requested_model != model else ""
         event.cache_breakpoint = marked
         event.prefix_tokens = prefix_tokens
         return _Plan(
@@ -1478,6 +1483,35 @@ class Gateway:
         self._pace_cached_at = now
         return self._pace_value
 
+    async def _ahead_of_pace(self) -> bool:
+        """True when enforcement should act. False whenever it cannot be sure."""
+        if not self.pacing.enforcing:
+            return False
+        pace = await self._cached_pace()
+        return pace is not None and pace > self.pacing.ahead_threshold
+
+    async def _downshift(
+        self, model: str, body: Dict[str, Any], key: KeyConfig, priority: int
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Substitute a cheaper model for batch work while ahead of pace.
+
+        The one lever here that changes *what the caller gets* rather than when or
+        where they get it, so it is off unless configured, batch-priority only, and
+        recorded on the request. It also refuses to substitute a model the key is
+        not allowed to use: a pacing policy must not widen what a tenant can reach.
+        """
+        downshift = self.config.pacing.model_downshift
+        if not downshift or priority < PRIORITY_BATCH:
+            return model, body
+        if not await self._ahead_of_pace():
+            return model, body
+        substituted = map_model(model, downshift)
+        if substituted == model or not key.supports_model(substituted):
+            return model, body
+        updated = dict(body)
+        updated["model"] = substituted
+        return substituted, updated
+
     async def _apply_pacing(self, plan: _Plan) -> None:
         """Hold a batch request back while the pool is ahead of its quota pace.
 
@@ -1487,6 +1521,15 @@ class Gateway:
         """
         if not self.pacing.enforcing or plan.priority < PRIORITY_BATCH:
             return
+        if not await self._ahead_of_pace():
+            return
+
+        # Cheaper than waiting, so it is tried first: the Batches API is priced
+        # below standard and spends a different upstream limit, which is the whole
+        # reason being ahead of pace is worth acting on at all.
+        if self.config.pacing.prefer_batch_lane_when_ahead and self._may_spill(plan):
+            raise _SpillToBatch()
+
         delay = self.pacing.delay_for(
             plan.priority, PRIORITY_BATCH, await self._cached_pace()
         )

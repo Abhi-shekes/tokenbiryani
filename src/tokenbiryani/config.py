@@ -292,6 +292,22 @@ class PacingConfig:
     #: number nobody can attribute.
     weekly_budget_usd: Optional[float] = None
 
+    #: When enforcing and ahead of pace, send batch-priority work to the Message
+    #: Batches API even though the pool has capacity for it now. Batches are priced
+    #: below standard and spend a different upstream limit, so this is the cheapest
+    #: lever available before anything has to be refused or delayed. Needs
+    #: `batch.enabled`; without it there is no lane to prefer and this does nothing.
+    prefer_batch_lane_when_ahead: bool = True
+
+    #: Model substitutions for batch-priority work while ahead of pace, as
+    #: {pattern: replacement} with the same trailing-wildcard matching as
+    #: `options.model_map`. **Empty by default.** Unlike every other lever here this
+    #: changes the answer the caller gets rather than when or where they get it, and
+    #: the model is part of the affinity fingerprint, so a conversation that
+    #: downshifts mid-flight also takes a cache break. Batch-priority only, never
+    #: interactive, and every substitution is recorded on the request.
+    model_downshift: Dict[str, str] = field(default_factory=dict)
+
 
 @dataclass
 class CacheConfig:

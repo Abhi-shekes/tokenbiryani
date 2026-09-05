@@ -271,3 +271,207 @@ async def test_a_subscription_window_paces_its_own_account(gateway_factory):
     assert readings[0]["scope"] == "acct-01"
     assert readings[0]["source"] == "unified"
     assert "ahead of pace" in readings[0]["verdict"]
+
+
+# ---- pace-aware policy -----------------------------------------------------------
+
+AHEAD = {
+    "mode": "enforcing",
+    "weekly_budget_usd": 0.000001,
+    "ahead_threshold": 0.1,
+    "max_batch_delay_seconds": 0.05,
+}
+PRICED = {"claude-test-1": {"input": 3.0, "output": 15.0}}
+
+
+async def _get_ahead(gateway, key):
+    """One priced request, so there is spend on the ledger to be ahead of."""
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {}, key)
+
+
+async def test_a_downshift_needs_to_be_configured(gateway_factory, key):
+    """Off unless asked for: it is the one lever that changes the answer."""
+    gateway = gateway_factory(
+        ["acct-01"], overrides={"pacing": AHEAD, "pricing": PRICED}
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {"X-TokenBiryani-Priority": "batch"}, key)
+    assert gateway.events.recent(1)[0]["model_requested"] == ""
+
+
+async def test_batch_work_downshifts_when_ahead_of_pace(gateway_factory, key):
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": dict(AHEAD, model_downshift={"claude-test-1": "claude-test-2"}),
+            "pricing": PRICED,
+        },
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {"X-TokenBiryani-Priority": "batch"}, key)
+    event = gateway.events.recent(1)[0]
+    assert event["model"] == "claude-test-2"
+    assert event["model_requested"] == "claude-test-1"
+
+
+async def test_interactive_work_is_never_downshifted(gateway_factory, key):
+    """Batch-priority only. Substituting a model on someone's live session changes
+    the answer they are reading."""
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": dict(AHEAD, model_downshift={"claude-test-1": "claude-test-2"}),
+            "pricing": PRICED,
+        },
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {}, key)
+    event = gateway.events.recent(1)[0]
+    assert event["model"] == "claude-test-1"
+    assert event["model_requested"] == ""
+
+
+async def test_a_downshift_cannot_widen_what_a_key_may_reach(gateway_factory):
+    """A pacing policy must not hand a tenant a model their key does not allow."""
+    from tokenbiryani.config import KeyConfig
+
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": dict(AHEAD, model_downshift={"claude-test-1": "claude-test-2"}),
+            "pricing": PRICED,
+        },
+    )
+    narrow = KeyConfig(key="bir_test", name="default", models=["claude-test-1"])
+    await _get_ahead(gateway, narrow)
+
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {"X-TokenBiryani-Priority": "batch"}, narrow)
+    assert gateway.events.recent(1)[0]["model"] == "claude-test-1"
+
+
+async def test_nothing_is_downshifted_while_on_pace(gateway_factory, key):
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": {
+                "mode": "enforcing",
+                "weekly_budget_usd": 1_000_000.0,
+                "model_downshift": {"claude-test-1": "claude-test-2"},
+            },
+            "pricing": PRICED,
+        },
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {"X-TokenBiryani-Priority": "batch"}, key)
+    assert gateway.events.recent(1)[0]["model"] == "claude-test-1"
+
+
+async def test_advisory_mode_changes_nothing(gateway_factory, key):
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": {
+                "mode": "advisory",
+                "weekly_budget_usd": 0.000001,
+                "model_downshift": {"claude-test-1": "claude-test-2"},
+            },
+            "pricing": PRICED,
+        },
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {"X-TokenBiryani-Priority": "batch"}, key)
+    event = gateway.events.recent(1)[0]
+    assert event["model"] == "claude-test-1"
+    assert event["paced_for"] == 0.0
+
+
+async def test_batch_work_prefers_the_cheaper_lane_when_ahead(gateway_factory, key):
+    """The pool has capacity — it spills anyway, because the Batches API is priced
+    below standard and spends a different upstream limit. Cheaper than waiting, so
+    it is tried before the delay."""
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": dict(AHEAD, prefer_batch_lane_when_ahead=True),
+            "batch": {"enabled": True, "poll_interval_seconds": 0.01},
+            "pricing": PRICED,
+        },
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    completion = await gateway.complete(
+        _body(), {"X-TokenBiryani-Priority": "batch"}, key
+    )
+    assert completion.headers["x-tokenbiryani-via"] == "batch"
+    assert gateway.events.recent(1)[0]["via"] == "batch"
+
+
+async def test_the_lane_preference_can_be_turned_off(gateway_factory, key):
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": dict(AHEAD, prefer_batch_lane_when_ahead=False),
+            "batch": {"enabled": True, "poll_interval_seconds": 0.01},
+            "pricing": PRICED,
+        },
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    completion = await gateway.complete(
+        _body(), {"X-TokenBiryani-Priority": "batch"}, key
+    )
+    assert completion.headers.get("x-tokenbiryani-via") != "batch"
+    assert gateway.events.recent(1)[0]["paced_for"] > 0.0
+
+
+async def test_interactive_work_never_takes_the_batch_lane(gateway_factory, key):
+    gateway = gateway_factory(
+        ["acct-01"],
+        overrides={
+            "pacing": AHEAD,
+            "batch": {"enabled": True, "poll_interval_seconds": 0.01},
+            "pricing": PRICED,
+        },
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    completion = await gateway.complete(_body(), {}, key)
+    assert completion.headers.get("x-tokenbiryani-via") != "batch"
+
+
+async def test_without_a_batch_lane_there_is_nothing_to_prefer(gateway_factory, key):
+    """`batch.enabled` is off, so the policy falls through to the delay."""
+    gateway = gateway_factory(
+        ["acct-01"], overrides={"pacing": AHEAD, "pricing": PRICED}
+    )
+    await _get_ahead(gateway, key)
+
+    from conftest import body as _body
+
+    await gateway.complete(_body(), {"X-TokenBiryani-Priority": "batch"}, key)
+    assert gateway.events.recent(1)[0]["paced_for"] > 0.0

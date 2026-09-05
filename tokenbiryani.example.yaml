@@ -64,6 +64,16 @@ pacing:
   # without a stated budget they are simply not paced. Subscriptions report their own
   # 5h and 7d utilisation and need nothing here.
   # weekly_budget_usd: 400
+  # While ahead of pace, send batch work to the Batches API even though the pool has
+  # capacity: priced below standard and spends a different limit, so it beats
+  # waiting. Needs batch.enabled; without it there is no lane to prefer.
+  prefer_batch_lane_when_ahead: true
+  # Substitute a cheaper model for BATCH work while ahead of pace. Empty by default:
+  # every other lever here changes when or where a request runs, this one changes
+  # what the caller gets. Never applied to interactive traffic, never into a model
+  # the key is not allowed, and always recorded on the request.
+  # model_downshift:
+  #   claude-opus-*: claude-sonnet-5
 
 cache:
   # Add a cache_control breakpoint to requests that carry none, at the end of the

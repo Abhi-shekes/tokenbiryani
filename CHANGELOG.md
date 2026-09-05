@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `pacing.prefer_batch_lane_when_ahead` (default `true`, needs `batch.enabled`) sends
+  batch-priority work to the Message Batches API while the pool is ahead of pace,
+  even though the pool has capacity for it. Batches are priced below standard and
+  spend a different upstream limit, so it beats waiting: the work still happens and
+  costs less. Tried before the pacing delay for that reason.
+- `pacing.model_downshift` substitutes a cheaper model for batch-priority work while
+  ahead of pace, with the same trailing-wildcard matching as `options.model_map`.
+  **Empty by default.** It is the only lever here that changes what the caller gets
+  rather than when or where they get it, so it is batch-only, refuses to substitute
+  into a model the key is not allowed to use, and records `model_requested` on the
+  request.
 - Per-conversation budgets. `keys[].session_cap_usd` and `keys[].session_max_turns`
   bound one conversation inside a key's allowance, where `spend_cap_usd` bounds
   everything the key does. Enforced across instances, because the counters ride the
