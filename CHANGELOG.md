@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-06
+
 ### Added
 - An **Efficiency** screen in the console, drawing all four of the new endpoints on
   one page: quota pace, prompt-cache diagnosis, the most expensive conversations, and
@@ -15,13 +17,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The request inspector shows the three new facts a request now carries: a model
   substituted by pacing, time spent held back by it, and a missing `cache_control`
   breakpoint on a prefix large enough to have been cached.
-
-### Changed
-- The benchmark's published figures move with adaptive output leases in place:
-  `sticky_headroom` reaches 79.6% cache hit at $0.4774, and cache-blind routing now
-  costs 2.00x rather than 1.94x. Reproduced by `python benchmarks/cache_affinity.py`.
-
-### Added
 - `pacing.prefer_batch_lane_when_ahead` (default `true`, needs `batch.enabled`) sends
   batch-priority work to the Message Batches API while the pool is ahead of pace,
   even though the pool has capacity for it. Batches are priced below standard and
@@ -80,6 +75,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   request. `session_key()` takes a `scope`, and the gateway passes `key.name`.
 - `StateStore.clear_affinity_for_account()`, implemented on all three backends, so
   deleting an account releases the sessions pinned to it.
+- A release workflow. A `v*` tag is now the only thing that publishes: it refuses to
+  run unless the tag, `pyproject.toml` and `__init__.py` name the same version and
+  `CHANGELOG.md` has a dated section for it, then builds the wheel, creates the
+  GitHub release with notes quoted from that section, pushes the multi-arch image to
+  GHCR and deploys the docs. PyPI publishing waits behind the `PYPI_PUBLISH`
+  repository variable so a tag cannot fail on a trusted publisher that does not
+  exist yet.
+- `scripts/changelog.py`, the single reader of `CHANGELOG.md`, so the release notes
+  and the changelog cannot drift apart.
+- CI fails a pull request that changes user-visible behaviour without a changelog
+  line, unless it carries the `no-changelog` label.
+- CI packages the wheel on every run and asserts what is inside it — the price
+  table and the console are there, the test scaffolding is not. That was previously
+  discovered at release time.
+- Branch and release process in `CONTRIBUTING.md`: `main` is protected and linear,
+  work lands through short-lived prefixed branches, and the changelog is written as
+  you go.
+- Project URLs in the package metadata, so the PyPI page links to the repository,
+  the documentation site, the issue tracker and the changelog. They were commented
+  out while the project had no published home.
+
+### Changed
+- The benchmark's published figures move with adaptive output leases in place:
+  `sticky_headroom` reaches 79.6% cache hit at $0.4774, and cache-blind routing now
+  costs 2.00x rather than 1.94x. Reproduced by `python benchmarks/cache_affinity.py`.
+- Workflows declare `permissions: contents: read` by default and raise it per job,
+  pull-request runs supersede their predecessors, and every job has a timeout.
 
 ### Fixed
 - The routing inspector's "Affinity broke" notice used a `warn` class the stylesheet
@@ -114,28 +136,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `AccountConfig.cost_tier` now says in the code what it is: a routing weight that
   never enters cost accounting. Reported spend and every spend cap come from the
   model price table alone.
-- A release workflow. A `v*` tag is now the only thing that publishes: it refuses to
-  run unless the tag, `pyproject.toml` and `__init__.py` name the same version and
-  `CHANGELOG.md` has a dated section for it, then builds the wheel, creates the
-  GitHub release with notes quoted from that section, pushes the multi-arch image to
-  GHCR and deploys the docs. PyPI publishing waits behind the `PYPI_PUBLISH`
-  repository variable so a tag cannot fail on a trusted publisher that does not
-  exist yet.
-- `scripts/changelog.py`, the single reader of `CHANGELOG.md`, so the release notes
-  and the changelog cannot drift apart.
-- CI fails a pull request that changes user-visible behaviour without a changelog
-  line, unless it carries the `no-changelog` label.
-- CI packages the wheel on every run and asserts what is inside it — the price
-  table and the console are there, the test scaffolding is not. That was previously
-  discovered at release time.
 - The changelog check is its own workflow, so applying `no-changelog` re-runs it.
   As a job in `ci.yml` it only fired on push events, which meant the label could
   never clear the failure it exists to clear.
-- Branch and release process in `CONTRIBUTING.md`: `main` is protected and linear,
-  work lands through short-lived prefixed branches, and the changelog is written as
-  you go.
-
-### Fixed
 - CI ran on pushes to `main` while the default branch was `master`, so no push to
   the trunk had ever triggered it. The branch is now `main`.
 - The browser suites ran in all three matrix entries against whatever Chrome the
@@ -150,10 +153,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `README.md` still said the compose stack boots against a bundled mock and comes up
   healthy. It comes up empty, and says so.
 - `ruff` and `mypy` ran once per Python version for no benefit; they are one job now.
-
-### Changed
-- Workflows declare `permissions: contents: read` by default and raise it per job,
-  pull-request runs supersede their predecessors, and every job has a timeout.
 
 ## [0.1.0] - 2026-09-05
 

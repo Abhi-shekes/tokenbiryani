@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tokenbiryani"
-version = "0.1.0"
+version = "0.2.0"
 description = "A pooling gateway for Claude accounts: routes on live rate-limit headers, keeps prompt caches warm, fails over without dropping a stream."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -53,11 +53,12 @@ dev = [
 [project.scripts]
 tokenbiryani = "tokenbiryani.cli:main"
 
-# Set these when the project has a home. Shipping links to a repository that does
-# not exist is worse than shipping none.
-# [project.urls]
-# Homepage = "https://github.com/<owner>/tokenbiryani"
-# Issues = "https://github.com/<owner>/tokenbiryani/issues"
+[project.urls]
+Homepage = "https://github.com/Abhi-shekes/tokenbiryani"
+Documentation = "https://abhi-shekes.github.io/tokenbiryani/"
+Repository = "https://github.com/Abhi-shekes/tokenbiryani"
+Issues = "https://github.com/Abhi-shekes/tokenbiryani/issues"
+Changelog = "https://github.com/Abhi-shekes/tokenbiryani/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tokenbiryani"]
