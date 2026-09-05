@@ -1,12 +1,12 @@
 site_name: tokenbiryani
 site_description: A pooling gateway for Claude accounts.
-# Uncomment once the repository has a home; until then every page would carry a
-# broken "edit this page" link.
-# repo_url: https://github.com/<owner>/tokenbiryani
-# edit_uri: edit/main/docs/
+site_url: https://abhi-shekes.github.io/tokenbiryani/
+repo_url: https://github.com/Abhi-shekes/tokenbiryani
+edit_uri: edit/main/docs/
 
 theme:
   name: material
+  custom_dir: overrides
   features:
     - navigation.sections
     - navigation.top

@@ -5,6 +5,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- A social preview image, so a link to the repository unfurls as the benchmark
+  result rather than as GitHub's default grey card. Checked in at
+  `docs/images/social-preview.png` and rendered from the console's own palette.
+- The documentation site carries Open Graph and Twitter card tags, pointing at the
+  same image. Material writes none of its own without the `social` plugin, which
+  needs Cairo and Pango on the build machine; `overrides/main.html` writes them
+  instead.
+
+### Changed
+- `mkdocs.yml` sets `site_url`, `repo_url` and `edit_uri`. They were commented out
+  while the project had no published home, which is no longer true — the docs now
+  carry a repository link and working "edit this page" links.
+
 ## [0.2.0] - 2026-09-06
 
 ### Added
