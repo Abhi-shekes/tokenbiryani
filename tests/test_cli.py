@@ -261,3 +261,28 @@ def test_serve_warns_when_no_key_can_reach_the_console(tmp_path, monkeypatch, ca
     fake_uvicorn(monkeypatch, {})
     cli.cmd_serve(build_parser().parse_args(["-c", str(config), "serve"]))
     assert "cannot be used" in capsys.readouterr().out
+
+
+def test_serve_bounds_its_graceful_shutdown(tmp_path, monkeypatch):
+    """This gateway always holds a connection that never ends.
+
+    /admin/events is an SSE stream, open for as long as a console tab is. Without a
+    bound, uvicorn's graceful shutdown waits for it forever: a reload or a restart
+    hangs at "Waiting for connections to close" with the port still open and
+    answering nothing, which reads as a wedged gateway and fails a healthcheck.
+    """
+    import tokenbiryani.cli as cli
+
+    config = tmp_path / "tokenbiryani.yaml"
+    config.write_text(
+        "server: {host: 127.0.0.1, port: 8787}\n"
+        "accounts:\n  - {id: a, type: anthropic_api, api_key: k}\n"
+        "keys:\n  - {key: bir_graceful_test_0123456789, name: d, admin: true}\n"
+    )
+
+    for argv in (["serve"], ["serve", "--reload"]):
+        served = {}
+        fake_uvicorn(monkeypatch, served)
+        assert cli.cmd_serve(build_parser().parse_args(["-c", str(config)] + argv)) == 0
+        assert served["timeout_graceful_shutdown"] == cli.GRACEFUL_SHUTDOWN_SECONDS, argv
+    assert 0 < cli.GRACEFUL_SHUTDOWN_SECONDS <= 30

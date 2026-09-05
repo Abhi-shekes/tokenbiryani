@@ -103,6 +103,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docker/tokenbiryani.yaml` is in the repository. An unanchored `tokenbiryani.yaml`
   ignore rule matched it at every depth, so the file `docker compose up` mounts was
   never committed and a fresh clone could not start the stack.
+- `serve` bounds its graceful shutdown. This gateway always holds a connection that
+  never ends — `/admin/events` is an SSE stream open for as long as a console tab is
+  — so a reload or a restart hung at "Waiting for connections to close" with the port
+  open and answering nothing. That wedged the container under `serve --reload`
+  whenever a source file was edited with the console open.
 - A rejected key costs one request instead of five, and says where the right key
   lives. Signing in used to start the poll and the event stream before knowing the
   key was any good, and the stream then retried the refused key on its own timer.

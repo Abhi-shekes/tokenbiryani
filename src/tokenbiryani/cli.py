@@ -19,6 +19,15 @@ from typing import Any, Dict, List, Optional
 DEFAULT_CONFIG = "tokenbiryani.yaml"
 DEFAULT_URL = "http://127.0.0.1:8787"
 
+#: How long to wait for open connections before closing them anyway.
+#:
+#: Without a bound, uvicorn waits forever, and this gateway always has a connection
+#: that never ends: /admin/events is an SSE stream held open by every console tab.
+#: A reload or a restart would then hang at "Waiting for connections to close" while
+#: the port stayed open and answered nothing — which reads as a wedged gateway, and
+#: fails a container healthcheck.
+GRACEFUL_SHUTDOWN_SECONDS = 5
+
 # Approximations of the console palette: ready / cooling / disabled / cache / brand.
 C = {
     "ready": "\033[38;5;42m",
@@ -349,10 +358,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
             log_level=args.log_level,
             reload=True,
             reload_dirs=args.reload_dir or None,
+            timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         )
         return 0
 
-    uvicorn.run(create_app(config), host=host, port=port, log_level=args.log_level)
+    uvicorn.run(
+        create_app(config),
+        host=host,
+        port=port,
+        log_level=args.log_level,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
+    )
     return 0
 
 
