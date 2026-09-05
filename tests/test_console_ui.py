@@ -116,6 +116,17 @@ def page(live, browser):
     page.close()
 
 
+def open_first_request(page):
+    """Click the newest request row, tolerating a repaint mid-click.
+
+    An ElementHandle grabbed from query_selector_all goes stale the moment the live
+    feed repaints the list, and then the click fails with "element is not attached
+    to the DOM" — a flake that depends entirely on whether a repaint lands inside
+    the click. A locator re-resolves the selector on each retry, so it survives one.
+    """
+    page.locator("#requests [data-request]").first.click()
+
+
 def test_the_request_list_populates_from_history(page):
     """The regression: history was only fetched when the live stream was down."""
     rows = page.query_selector_all("#stream [data-request]")
@@ -125,7 +136,7 @@ def test_the_request_list_populates_from_history(page):
 def test_the_inspector_opens_and_shows_the_decision(page):
     page.click(".nav button[data-tab='requests']")
     page.wait_for_selector("#requests [data-request]")
-    page.query_selector_all("#requests [data-request]")[0].click()
+    open_first_request(page)
     page.wait_for_selector("#inspector .card", timeout=10000)
     text = page.inner_text("#inspector")
     assert "Routing decision" in text
@@ -160,8 +171,9 @@ def test_the_pool_renders_its_parts(page):
 
 def test_account_detail_opens_from_the_pool(page):
     page.click(".nav button[data-tab='pool']")
-    page.wait_for_selector("#accounts-wrap tr[data-account]")
-    page.query_selector("#accounts-wrap tr[data-account]").click()
+    # A locator, for the same reason as the request rows: the accounts table
+    # repaints on the poll, and a handle taken before that goes stale.
+    page.locator("#accounts-wrap tr[data-account]").first.click()
     page.wait_for_selector("#account-detail .card", timeout=10000)
     assert "acct-0" in page.inner_text("#account-detail")
 
@@ -799,7 +811,7 @@ def test_the_inspector_flags_a_request_that_asked_for_no_caching(page):
     where the operator is already looking at why a request cost what it did."""
     page.click(".nav button[data-tab='requests']")
     page.wait_for_selector("#requests [data-request]")
-    page.query_selector_all("#requests [data-request]")[0].click()
+    open_first_request(page)
     page.wait_for_selector("#inspector .card", timeout=10000)
     # The fixture's bodies are small, so the notice is correctly absent; what must
     # hold either way is that rendering these fields does not break the panel.
