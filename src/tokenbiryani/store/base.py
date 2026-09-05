@@ -18,6 +18,18 @@ from typing import Dict, List, Optional
 SCOPE_KEY = "key"
 SCOPE_ACCOUNT = "account"
 
+#: One conversation's cost. A key cap catches a tenant overspending; nothing caught
+#: a single agent loop doing it, and one loop resending a 100k-token prefix a few
+#: hundred times is a whole week of quota with one virtual key's name on it.
+SCOPE_SESSION = "session"
+
+#: Turn *count* per conversation, carried on the same ledger with an amount of 1.0
+#: rather than a table of its own. The ledger is already (scope, name, at, amount)
+#: with a window query over it, which is exactly what counting turns in a window
+#: needs — and it means turn caps hold across instances on Redis for free, where a
+#: counter kept in the process would not.
+SCOPE_SESSION_TURNS = "session_turns"
+
 
 class StateStore(abc.ABC):
     @abc.abstractmethod
@@ -31,6 +43,20 @@ class StateStore(abc.ABC):
     @abc.abstractmethod
     async def clear_affinity(self, session_key: str) -> None:
         ...
+
+    @abc.abstractmethod
+    async def clear_affinity_for_account(self, account_id: str) -> int:
+        """Drop every session pinned to this account; return how many. 
+
+        Called when an account is deleted. Without it those sessions keep naming a
+        credential that no longer exists for the rest of the affinity TTL: the
+        router cannot match the owner, so it scores every candidate at zero
+        affinity and reports a cache break on each one — noise attributed to
+        routing for something routing did not do.
+
+        Not called on *disable*, which is usually temporary. A disabled account
+        that comes back should find its conversations still pinned to it.
+        """
 
     @abc.abstractmethod
     async def record_key_request(self, key_name: str, now: float) -> int:

@@ -167,6 +167,16 @@ class SqliteStateStore(StateStore):
 
         await self._run(write)
 
+    async def clear_affinity_for_account(self, account_id: str) -> int:
+        def write(conn: sqlite3.Connection) -> int:
+            cursor = conn.execute(
+                "DELETE FROM affinity WHERE account_id = ?", (account_id,)
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+
+        return await self._run(write)
+
     async def record_key_request(self, key_name: str, now: float) -> int:
         def write(conn: sqlite3.Connection) -> int:
             conn.execute(

@@ -34,6 +34,9 @@ class RequestEvent:
     session_key: str = ""
     streamed: bool = False
     priority: str = "interactive"
+    #: The model the caller asked for, when pacing substituted a different one.
+    #: Empty when nothing was substituted, which is the normal case.
+    model_requested: str = ""
     #: "messages" (the normal path) or "batch" (spilled to the Batches API)
     via: str = "messages"
     batch_id: Optional[str] = None
@@ -43,6 +46,9 @@ class RequestEvent:
     latency: float = 0.0
     ttft: Optional[float] = None
     queued_for: float = 0.0
+    #: Seconds this request was deliberately held back to protect a quota window.
+    #: Batch priority only, and only when pacing is enforcing.
+    paced_for: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
@@ -51,6 +57,11 @@ class RequestEvent:
     saved_usd: Optional[float] = None
     affinity_broken: bool = False
     affinity_honored: bool = False
+    #: Whether the caller marked anything with `cache_control`. None when the
+    #: request never got far enough to be inspected.
+    cache_breakpoint: Optional[bool] = None
+    #: Rough size of the stable head — the part a breakpoint would cover.
+    prefix_tokens: int = 0
     decision: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 

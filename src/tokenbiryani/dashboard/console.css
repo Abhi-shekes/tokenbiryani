@@ -592,3 +592,19 @@ label.f .t em{font-style:normal;text-transform:none;letter-spacing:normal;
 .pickt{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:var(--mono);
   font-size:11.5px;color:var(--text);word-break:break-all}
 .picks{font-size:11px;color:var(--text-3);line-height:1.5}
+
+/* ---- Efficiency ----------------------------------------------------------- */
+/* A verdict that needs acting on. Colour only, never colour alone: every one of
+   these sits beside the sentence saying what is wrong. */
+.warn{color:var(--crit-t)}
+
+/* The pace track carries a second mark — where spending *should* be by now — so
+   unlike the headroom meters it has to position a child and must not clip it.
+   Scope names are account ids rather than "req"/"in"/"out", so the label column
+   is wider than the 20px those get. */
+.pace .track{position:relative;overflow:visible}
+.pace .k{width:auto;min-width:72px;font-size:10.5px}
+.pace .v{width:48px}
+/* The target mark. Taller than the track so it reads as a threshold rather than
+   as part of the fill. */
+.pace .track b{position:absolute;top:-3px;bottom:-3px;border-radius:1px}

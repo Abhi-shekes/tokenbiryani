@@ -37,6 +37,7 @@ nav:
   - Quickstart: quickstart.md
   - Why is my bill higher?: caching.md
   - Routing: routing.md
+  - Spending the week on purpose: pacing.md
   - Streaming and retries: streaming.md
   - Configuration: configuration.md
   - Account types: providers.md

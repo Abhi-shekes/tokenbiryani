@@ -44,6 +44,17 @@ class MemoryStateStore(StateStore):
         async with self._lock:
             self._affinity.pop(session_key, None)
 
+    async def clear_affinity_for_account(self, account_id: str) -> int:
+        async with self._lock:
+            doomed = [
+                session
+                for session, (owner, _) in self._affinity.items()
+                if owner == account_id
+            ]
+            for session in doomed:
+                del self._affinity[session]
+            return len(doomed)
+
     async def record_key_request(self, key_name: str, now: float) -> int:
         async with self._lock:
             bucket = self._requests[key_name]

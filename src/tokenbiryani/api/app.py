@@ -204,6 +204,43 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
         authenticate_admin(request)
         return JSONResponse(app.state.gateway.capacity_horizon())
 
+    @app.get("/admin/estimation")
+    async def estimation(request: Request) -> JSONResponse:
+        """What the output estimator has learned, per model.
+
+        Worth looking at before trusting it: `predicting: false` on a model means
+        every request for it is still leasing the caller's full `max_tokens`.
+        """
+        authenticate_admin(request)
+        return JSONResponse(app.state.gateway.estimator.snapshot())
+
+    @app.get("/admin/sessions")
+    async def sessions(request: Request) -> JSONResponse:
+        """The most expensive conversations in the spend window, worst first.
+
+        A key cap catches a tenant overspending. This is what catches one agent
+        loop doing it inside that allowance.
+        """
+        authenticate_admin(request)
+        return JSONResponse(await app.state.gateway.sessions_report())
+
+    @app.get("/admin/pacing")
+    async def pacing(request: Request) -> JSONResponse:
+        """Whether this pool is on course to spend its quota window, or to run dry
+        early, or to reach the end of the week with quota unused."""
+        authenticate_admin(request)
+        return JSONResponse(await app.state.gateway.pacing_report())
+
+    @app.get("/admin/cache-advice")
+    async def cache_advice(request: Request) -> JSONResponse:
+        """Why the cache hit rate is what it is, per virtual key and model.
+
+        The distinction the hit rate alone cannot make: a client that never marked a
+        breakpoint is not a routing problem and no strategy change will help it.
+        """
+        authenticate_admin(request)
+        return JSONResponse(app.state.gateway.cache_advisor.advice())
+
     @app.get("/admin/usage")
     async def usage(
         request: Request,
@@ -465,6 +502,8 @@ def create_app(config: Config, gateway: Optional[Gateway] = None) -> FastAPI:
             spend_cap_usd=payload.get("spend_cap_usd"),
             priority=payload.get("priority"),
             max_wait_seconds=payload.get("max_wait_seconds"),
+            session_cap_usd=payload.get("session_cap_usd"),
+            session_max_turns=payload.get("session_max_turns"),
             admin=payload.get("admin"),
         )
         # The only time the plaintext exists outside the caller's hands.
