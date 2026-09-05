@@ -131,6 +131,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   or with the source bind-mounted showed the old page until something restarted it.
 - `.manual-test-key`, a credential-encryption key for a database that no longer
   exists, is no longer committed.
+- The browser test suite no longer writes a credential-encryption key into the
+  working directory. `store.secret_key_path` defaults relative to the working
+  directory, so adding an account through the console under test dropped a 0600
+  secret next to the source and reused it on every later run. A session fixture now
+  fails the run if any test does this again.
 
 ### Security
 - Subscription access and refresh tokens are encrypted at rest and stripped by name
