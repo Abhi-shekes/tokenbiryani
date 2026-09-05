@@ -211,3 +211,53 @@ def test_keygen_mints_two_different_kinds_of_key(capsys):
     from cryptography.fernet import Fernet
 
     Fernet(secret.encode())
+
+
+def fake_uvicorn(monkeypatch, served):
+    import sys
+
+    monkeypatch.setitem(
+        sys.modules, "uvicorn",
+        type("uvicorn", (), {"run": staticmethod(lambda *a, **k: served.update(k))})(),
+    )
+
+
+def test_serve_says_which_keys_this_gateway_accepts(tmp_path, monkeypatch, capsys):
+    """Two dev stacks a `docker compose up` apart have different keys, and the only
+    symptom of using the wrong one is a 401. Masked names in the banner make it
+    obvious which gateway you are actually looking at.
+    """
+    import tokenbiryani.cli as cli
+
+    config = tmp_path / "tokenbiryani.yaml"
+    config.write_text(
+        "server: {host: 127.0.0.1, port: 8787}\n"
+        "accounts:\n  - {id: a, type: anthropic_api, api_key: k}\n"
+        "keys:\n"
+        "  - {key: bir_dev_only_change_me_0123456789, name: default, admin: true}\n"
+        "  - {key: bir_tenant_readonly_key_000111222, name: tenant}\n"
+    )
+    fake_uvicorn(monkeypatch, {})
+    assert cli.cmd_serve(build_parser().parse_args(["-c", str(config), "serve"])) == 0
+
+    out = capsys.readouterr().out
+    assert "default" in out and "tenant" in out
+    assert "(admin)" in out
+    # Enough to tell two keys apart, never enough to use one.
+    assert "bir_dev_only_change_me_0123456789" not in out
+    assert "bir_tenant_readonly_key_000111222" not in out
+    assert "…" in out
+
+
+def test_serve_warns_when_no_key_can_reach_the_console(tmp_path, monkeypatch, capsys):
+    import tokenbiryani.cli as cli
+
+    config = tmp_path / "tokenbiryani.yaml"
+    config.write_text(
+        "server: {host: 127.0.0.1, port: 8787}\n"
+        "accounts:\n  - {id: a, type: anthropic_api, api_key: k}\n"
+        "keys:\n  - {key: bir_tenant_readonly_key_000111222, name: tenant}\n"
+    )
+    fake_uvicorn(monkeypatch, {})
+    cli.cmd_serve(build_parser().parse_args(["-c", str(config), "serve"]))
+    assert "cannot be used" in capsys.readouterr().out
