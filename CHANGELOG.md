@@ -103,6 +103,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docker/tokenbiryani.yaml` is in the repository. An unanchored `tokenbiryani.yaml`
   ignore rule matched it at every depth, so the file `docker compose up` mounts was
   never committed and a fresh clone could not start the stack.
+- The compose stack demonstrates the thing the project is about. Its mock upstream
+  now models the per-credential prompt cache (`--cache` on
+  `tokenbiryani.testing.server`), and `docker/tokenbiryani.yaml` carries illustrative
+  pricing — so cache hit rate and cost read as real numbers instead of a flat 0% and
+  a column of $0.0000 on the gateway's own demo stack.
 - `serve` bounds its graceful shutdown. This gateway always holds a connection that
   never ends — `/admin/events` is an SSE stream open for as long as a console tab is
   — so a reload or a restart hung at "Waiting for connections to close" with the port

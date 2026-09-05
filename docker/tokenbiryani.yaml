@@ -61,9 +61,13 @@ keys:
 
 # Costs are reported, and spend caps enforced, only for models named here. The
 # gateway ships no price list, so it can never bill you against stale numbers.
-# pricing:
-#   claude-sonnet-5:
-#     input: 3.0
-#     output: 15.0
-#     cache_read: 0.30
-#     cache_write: 3.75
+#
+# These are ILLUSTRATIVE RATIOS for the mock stack, not Anthropic's price list, and
+# they exist so the cost charts show something rather than a column of $0.0000.
+# Replace them from Anthropic's current pricing page before trusting a figure.
+pricing:
+  claude-*:
+    input: 3.0
+    output: 15.0
+    cache_read: 0.30
+    cache_write: 3.75
