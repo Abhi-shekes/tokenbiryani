@@ -9,7 +9,10 @@ description = "A pooling gateway for Claude accounts: routes on live rate-limit 
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.8"
-keywords = ["claude", "anthropic", "gateway", "proxy", "rate-limit", "load-balancing"]
+keywords = [
+  "claude", "claude-code", "anthropic", "gateway", "llm-gateway", "proxy",
+  "rate-limit", "load-balancing", "prompt-caching",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
