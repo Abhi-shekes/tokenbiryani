@@ -342,6 +342,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../pacing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spending the week on purpose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../streaming/" class="md-nav__link">
         
   
@@ -455,6 +482,50 @@
     <span class="md-ellipsis">
       
         Spend caps are windowed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-conversation-caps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-conversation caps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizing-the-output-lease" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizing the output lease
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-cache-diagnosis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt-cache diagnosis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quota-pacing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quota pacing
       
     </span>
   </a>
@@ -727,10 +798,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_16" >
         
           
-          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="">
+          <label class="md-nav__link" for="__nav_16" id="__nav_16_label" tabindex="">
             
   
   
@@ -748,8 +819,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_15">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_16">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -938,6 +1009,50 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#per-conversation-caps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-conversation caps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sizing-the-output-lease" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sizing the output lease
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-cache-diagnosis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt-cache diagnosis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quota-pacing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quota pacing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#keys" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1021,6 +1136,45 @@ cap on a persistent store would eventually wedge the gateway shut and stay that 
 which is not what an operator means by "cap".</p>
 <p>Caps only survive a restart if the store does — <code>store.backend: memory</code> loses the
 ledger, silently resetting every cap.</p>
+<h2 id="per-conversation-caps">Per-conversation caps<a class="headerlink" href="#per-conversation-caps" title="Permanent link">&para;</a></h2>
+<p>A key cap bounds everything a key does. It cannot see a runaway <em>inside</em> that
+allowance — one agent loop resending a large prefix a few hundred times is the whole
+cap with that key's name on it, and there is nothing to look at until it trips.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">sessions</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">track</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">              </span><span class="c1"># record per-session cost and turns</span>
+<span class="w">  </span><span class="nt">runaway_turns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">200</span><span class="w">       </span><span class="c1"># what GET /admin/sessions flags</span>
+<span class="w">  </span><span class="nt">runaway_spend_usd</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+</code></pre></div>
+<p><code>sessions.track</code> writes two extra ledger rows per request; those rows are what the
+caps below and the report are made of. Turning it off makes both go quiet — and stops
+the caps being enforced, since the counters they read are the ones tracking writes.</p>
+<h2 id="sizing-the-output-lease">Sizing the output lease<a class="headerlink" href="#sizing-the-output-lease" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nt">routing</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">output_estimate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">adaptive</span><span class="w">     </span><span class="c1"># or max_tokens</span>
+<span class="w">  </span><span class="nt">output_estimate_quantile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
+<span class="w">  </span><span class="nt">output_estimate_min_samples</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+</code></pre></div>
+<p><code>adaptive</code> leases what a model has actually been returning rather than the caller's
+<code>max_tokens</code>, bounded by that ceiling either way — it can only reserve <em>less</em>. See
+<a href="../routing/#sizing-the-output-half">Routing</a> for why the ceiling starves a pool.</p>
+<h2 id="prompt-cache-diagnosis">Prompt-cache diagnosis<a class="headerlink" href="#prompt-cache-diagnosis" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nt">cache</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">auto_breakpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">   </span><span class="c1"># leave it off unless you need it</span>
+<span class="w">  </span><span class="nt">advice_min_requests</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+</code></pre></div>
+<p>Diagnosis (<code>GET /admin/cache-advice</code>) is always on and costs nothing.
+<code>auto_breakpoint</code> makes the gateway <em>edit</em> the caller's request, which it otherwise
+refuses to do — see <a href="../caching/">Why is my bill higher?</a>.</p>
+<h2 id="quota-pacing">Quota pacing<a class="headerlink" href="#quota-pacing" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nt">pacing</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">advisory</span><span class="w">           </span><span class="c1"># advisory | enforcing</span>
+<span class="w">  </span><span class="nt">curve</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linear</span><span class="w">            </span><span class="c1"># or business_hours</span>
+<span class="w">  </span><span class="nt">weekly_budget_usd</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">  </span><span class="c1"># required for API-key accounts</span>
+</code></pre></div>
+<p>Subscriptions report their own rolling windows and are paced automatically. API keys
+report no weekly window at all, so without a stated budget they are simply not paced.
+Full detail in <a href="../pacing/">Spending the week on purpose</a>.</p>
 <h2 id="keys">Keys<a class="headerlink" href="#keys" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">keys</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${TOKENBIRYANI_KEY}</span>
@@ -1030,6 +1184,8 @@ ledger, silently resetting every cap.</p>
 <span class="w">    </span><span class="nt">pool</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">             </span><span class="c1"># empty means every account</span>
 <span class="w">    </span><span class="nt">rpm</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
 <span class="w">    </span><span class="nt">spend_cap_usd</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+<span class="w">    </span><span class="nt">session_cap_usd</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">    </span><span class="c1"># bounds one conversation</span>
+<span class="w">    </span><span class="nt">session_max_turns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">  </span><span class="c1"># within this key's allowance</span>
 <span class="w">    </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">interactive</span>
 <span class="w">    </span><span class="nt">max_wait_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
 </code></pre></div>

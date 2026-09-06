@@ -370,6 +370,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#is-it-even-switched-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Is it even switched on?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-to-check" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -414,6 +425,33 @@
     
   
     Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pacing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spending the week on purpose
   
 
     
@@ -716,10 +754,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_16" >
         
           
-          <label class="md-nav__link" for="__nav_15" id="__nav_15_label" tabindex="">
+          <label class="md-nav__link" for="__nav_16" id="__nav_16_label" tabindex="">
             
   
   
@@ -737,8 +775,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_15">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_16">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -916,6 +954,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#is-it-even-switched-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Is it even switched on?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-to-check" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -979,9 +1028,9 @@ models the per-credential cache:</p>
 <tbody>
 <tr>
 <td><code>sticky_headroom</code></td>
-<td>78.6%</td>
+<td>79.6%</td>
 <td>0</td>
-<td>$0.4923</td>
+<td>$0.4774</td>
 <td>—</td>
 </tr>
 <tr>
@@ -989,21 +1038,21 @@ models the per-credential cache:</p>
 <td>47.8%</td>
 <td>144</td>
 <td>$0.9535</td>
-<td>1.94x</td>
+<td>2.00x</td>
 </tr>
 <tr>
 <td><code>least_loaded</code></td>
 <td>47.8%</td>
 <td>144</td>
 <td>$0.9535</td>
-<td>1.94x</td>
+<td>2.00x</td>
 </tr>
 <tr>
 <td><code>headroom</code></td>
 <td>47.8%</td>
 <td>144</td>
 <td>$0.9535</td>
-<td>1.94x</td>
+<td>2.00x</td>
 </tr>
 </tbody>
 </table>
@@ -1013,10 +1062,54 @@ ratios, not a price list.</p>
 ignores affinity visits every account once per conversation, so they take the same
 number of misses. The penalty is inherent to cache-blindness, not a quirk of
 round-robin.</p>
+<h2 id="is-it-even-switched-on">Is it even switched on?<a class="headerlink" href="#is-it-even-switched-on" title="Permanent link">&para;</a></h2>
+<p>Anthropic's cache engages only where the request carries a <code>cache_control</code> marker.
+A client that never sets one pays full price on every turn no matter how the gateway
+routes, and that looks exactly like a routing failure: cache hit 0%.</p>
+<p>The hit rate cannot tell the two apart, so <code>GET /admin/cache-advice</code> does. Per virtual
+key and model it reports how often a breakpoint was present, how big the stable head
+is, the realised hit rate, and a verdict:</p>
+<table>
+<thead>
+<tr>
+<th>Verdict</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>no <code>cache_control</code> breakpoint on a stable prefix of about N tokens</td>
+<td>a client problem. <strong>No routing strategy can recover it.</strong></td>
+</tr>
+<tr>
+<td>breakpoints are being sent but the hit rate is low</td>
+<td>a routing problem — read the rest of this page</td>
+</tr>
+<tr>
+<td>the stable prefix is too small to cache</td>
+<td>nothing to fix</td>
+</tr>
+<tr>
+<td>caching is engaged and working</td>
+<td>nothing to do</td>
+</tr>
+</tbody>
+</table>
+<p><code>cache.auto_breakpoint: true</code> makes the gateway add the marker itself, at the end of
+the stable head — the last tool if there are tools, otherwise the system prompt. It
+is <strong>off by default and should stay off unless you need it</strong>: everywhere else this
+gateway routes rather than rewrites, and turning it on makes it the third exception
+to that rule after the two fields Bedrock and Vertex require. It never touches a
+request that already has a breakpoint, and never one whose prefix is too short for
+Anthropic to cache.</p>
+<p>None of this keeps prompt content. The body is read in memory and dropped; what is
+recorded is a boolean and a token count.</p>
 <h2 id="what-to-check">What to check<a class="headerlink" href="#what-to-check" title="Permanent link">&para;</a></h2>
 <ol>
 <li><strong>Your strategy.</strong> <code>sticky_headroom</code> is the default for this reason. <code>headroom</code>,
-   <code>least_loaded</code> and <code>round_robin</code> are all cache-blind.</li>
+   <code>least_loaded</code> and <code>round_robin</code> are all cache-blind — and note that <code>headroom</code>
+   is <code>sticky_headroom</code> with affinity switched off and nothing else changed, so it
+   can never route <em>better</em>, only the same or worse.</li>
 <li><strong>Cache breaks.</strong> <code>tokenbiryani status</code> reports them, and so does the console.
    A healthy pool should show approximately zero. Breaks mean the affinity owner
    could not serve — usually because it was cooling.</li>
@@ -1028,10 +1121,15 @@ round-robin.</p>
    by then too.</li>
 </ol>
 <h2 id="when-breaking-affinity-is-right">When breaking affinity is right<a class="headerlink" href="#when-breaking-affinity-is-right" title="Permanent link">&para;</a></h2>
-<p>When the owner genuinely cannot serve: it is cooling, disabled, or out of headroom.
-The router scores affinity against real availability rather than treating it as
-absolute, and every forced break is counted so the cost is visible rather than
-silent.</p>
+<p>When the owner genuinely cannot serve: it is cooling, disabled, or out of headroom.</p>
+<p>Under the default weights that decision is made by the <strong>filter</strong>, not the score.
+Affinity is worth 0.40 and headroom at most 0.40, so no headroom advantage a rival
+can hold — not even 100% against the owner's 1% — is enough to move a conversation.
+What moves it is the owner becoming ineligible: cooling, disabled, over its spend
+cap, at max concurrency, or with too little projected headroom to serve the request
+at all. Affinity is effectively absolute right up to the point the owner cannot
+serve, which is the behaviour you want and is stronger than a scoring trade-off.</p>
+<p>Every forced break is counted, so the cost is visible rather than silent.</p>
 
 
 
